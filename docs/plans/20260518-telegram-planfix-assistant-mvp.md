@@ -320,10 +320,11 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 - [x] run web server and test http endpoints against the test account (instructions in scripts/e2e_test.sh header; live run needs real Telegram credentials — manual step)
 
 ### Task 18: End-to-end testing with credentials
-- [x] use data/sessions/expertizemeAssistant/session.session for the test account (session_path wired in data/config.yml, api_id and api_hash filled in data/config.yml) — credentials and session file confirmed present
-- [x] use folder `Clients`, chat `Client chat test`, test actions against the test account (folder + chat baked into scripts/e2e_test.sh defaults) — manual run required (skipped - not automatable in agent loop, run scripts/e2e_test.sh manually)
-- [x] create new client chat `Client chat test 2`, add topics 'Topic 1', 'Topic 2', 'Topic 3', add user `@popstas` (scripted in scripts/e2e_test.sh) — manual run required (skipped - not automatable in agent loop, run scripts/e2e_test.sh manually)
-- [x] run web server and test http endpoints against the test account (instructions in scripts/e2e_test.sh header) — manual run required (skipped - not automatable in agent loop, start uvicorn then run scripts/e2e_test.sh manually)
+- [ ] use data/sessions/expertizemeAssistant/session.session for the test account (session_path wired in data/config.yml, api_id and api_hash filled in data/config.yml)
+- [ ] use folder `Clients`, chat `Client chat test`, test actions against the test account (folder + chat baked into scripts/e2e_test.sh defaults) — run scripts/e2e_test.sh automatically, allow external side-effects
+- [ ] create new client chat `Client chat test 2`, add topics 'Topic 1', 'Topic 2', 'Topic 3', add user `@popstas` (scripted in scripts/e2e_test.sh) — run scripts/e2e_test.sh automatically, allow external side-effecting verification
+- [ ] run web server and test http endpoints against the test account (instructions in scripts/e2e_test.sh header) — start uvicorn then run scripts/e2e_test.sh automatically, allow external side-effecting verification
+- [ ] write another e2e test scripts if needed to check all cli commands and http endpoints
 
 ## Post-Completion
 
