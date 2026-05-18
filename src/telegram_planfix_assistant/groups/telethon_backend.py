@@ -45,9 +45,17 @@ class TelethonGroupBackend:
         channel = chats[0]
         chat_id = int(getattr(channel, "id", 0))
         if enable_topics:
-            await self._client(
-                ToggleForumRequest(channel=channel, enabled=True)
-            )
+            # Telethon 1.43 added the `tabs` argument to ToggleForumRequest.
+            # Older Telethon versions reject the kwarg; try the new signature
+            # first and fall back for callers stuck on the legacy build.
+            try:
+                await self._client(
+                    ToggleForumRequest(channel=channel, enabled=True, tabs=True)
+                )
+            except TypeError:
+                await self._client(
+                    ToggleForumRequest(channel=channel, enabled=True)
+                )
         return chat_id
 
     async def add_member(self, *, chat_id: int, user: str) -> None:

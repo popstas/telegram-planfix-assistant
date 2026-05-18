@@ -6,9 +6,42 @@ imports.
 
 from __future__ import annotations
 
+import inspect
+import secrets
 from typing import Any
 
 from telegram_planfix_assistant.topics.service import TopicSummary
+
+
+def _import_forum_request(name: str) -> Any:
+    """Locate a forum-topic request type across Telethon versions.
+
+    Telethon shipped these requests under ``tl.functions.channels`` in older
+    builds and moved them to ``tl.functions.messages`` later. We try both so
+    the adapter works against whichever Telethon the host has installed.
+    """
+    try:
+        module = __import__(
+            "telethon.tl.functions.channels", fromlist=[name]
+        )
+        return getattr(module, name)
+    except (ImportError, AttributeError):
+        module = __import__(
+            "telethon.tl.functions.messages", fromlist=[name]
+        )
+        return getattr(module, name)
+
+
+def _peer_kwarg(request_cls: Any, peer: Any) -> dict[str, Any]:
+    """Return the entity kwarg for ``request_cls`` (``peer`` vs ``channel``)."""
+    params = inspect.signature(request_cls).parameters
+    if "peer" in params:
+        return {"peer": peer}
+    if "channel" in params:
+        return {"channel": peer}
+    raise RuntimeError(
+        f"{request_cls.__name__} accepts neither `peer` nor `channel`"
+    )
 
 
 def _extract_topic_id(updates: Any) -> int:
@@ -34,12 +67,15 @@ class TelethonTopicBackend:
         self._client = client
 
     async def create_topic(self, *, chat_id: int, name: str) -> int:
-        from telethon.tl.functions.channels import CreateForumTopicRequest
-
-        channel = await self._client.get_input_entity(chat_id)
-        result = await self._client(
-            CreateForumTopicRequest(channel=channel, title=name)
-        )
+        request_cls = _import_forum_request("CreateForumTopicRequest")
+        peer = await self._client.get_input_entity(chat_id)
+        kwargs: dict[str, Any] = {**_peer_kwarg(request_cls, peer), "title": name}
+        params = inspect.signature(request_cls).parameters
+        if "random_id" in params:
+            # Telethon's newer signature requires an explicit random_id so that
+            # replays don't accidentally create duplicates server-side.
+            kwargs["random_id"] = secrets.randbits(63)
+        result = await self._client(request_cls(**kwargs))
         return _extract_topic_id(result)
 
     async def send_message(
@@ -52,30 +88,26 @@ class TelethonTopicBackend:
         return int(getattr(sent, "id", 0))
 
     async def close_topic(self, *, chat_id: int, topic_id: int) -> None:
-        from telethon.tl.functions.channels import EditForumTopicRequest
-
-        channel = await self._client.get_input_entity(chat_id)
-        await self._client(
-            EditForumTopicRequest(
-                channel=channel,
-                topic_id=topic_id,
-                closed=True,
-            )
-        )
+        request_cls = _import_forum_request("EditForumTopicRequest")
+        peer = await self._client.get_input_entity(chat_id)
+        kwargs: dict[str, Any] = {
+            **_peer_kwarg(request_cls, peer),
+            "topic_id": topic_id,
+            "closed": True,
+        }
+        await self._client(request_cls(**kwargs))
 
     async def list_topics(self, *, chat_id: int) -> list[TopicSummary]:
-        from telethon.tl.functions.channels import GetForumTopicsRequest
-
-        channel = await self._client.get_input_entity(chat_id)
-        result = await self._client(
-            GetForumTopicsRequest(
-                channel=channel,
-                offset_date=None,
-                offset_id=0,
-                offset_topic=0,
-                limit=100,
-            )
-        )
+        request_cls = _import_forum_request("GetForumTopicsRequest")
+        peer = await self._client.get_input_entity(chat_id)
+        kwargs: dict[str, Any] = {
+            **_peer_kwarg(request_cls, peer),
+            "offset_date": None,
+            "offset_id": 0,
+            "offset_topic": 0,
+            "limit": 100,
+        }
+        result = await self._client(request_cls(**kwargs))
         out: list[TopicSummary] = []
         for topic in getattr(result, "topics", None) or []:
             topic_id = getattr(topic, "id", None)

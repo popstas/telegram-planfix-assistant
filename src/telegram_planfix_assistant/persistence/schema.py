@@ -68,10 +68,18 @@ _INDEXES = [
 def connect(database_path: Path) -> sqlite3.Connection:
     """Open a sqlite3 connection with sensible defaults for this service."""
     database_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(database_path), isolation_level=None, check_same_thread=False)
+    conn = sqlite3.connect(
+        str(database_path),
+        isolation_level=None,
+        check_same_thread=False,
+        timeout=30.0,
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # 30s busy timeout so CLI runs that briefly contend with the HTTP worker
+    # for a write lock wait instead of erroring out with "database is locked".
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 

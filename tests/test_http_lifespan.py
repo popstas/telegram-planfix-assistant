@@ -1,0 +1,97 @@
+"""Lifespan-driven session-manager wiring tests.
+
+The FastAPI factory auto-constructs a :class:`TelethonSessionManager` from
+config when no manager is passed (the production uvicorn path). The lifespan
+context manager then drives ``get_client()`` on startup and ``disconnect()``
+on shutdown. Without the auto-construct the service would come up
+permanently unauthorized, which is the bug Task 18 surfaced.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi.testclient import TestClient
+
+from telegram_planfix_assistant.config import load_config_from_text
+from telegram_planfix_assistant.http_api import create_app
+from telegram_planfix_assistant.telegram_client import session as session_module
+
+
+class _FakeClient:
+    def __init__(self) -> None:
+        self.connect_calls = 0
+        self.disconnect_calls = 0
+        self.authorized = True
+
+    async def connect(self) -> None:
+        self.connect_calls += 1
+
+    async def disconnect(self) -> None:
+        self.disconnect_calls += 1
+
+    async def is_user_authorized(self) -> bool:
+        return self.authorized
+
+    async def get_me(self) -> Any:
+        return type("Me", (), {"id": 1, "username": "fake"})()
+
+
+def test_create_app_auto_constructs_session_manager_and_connects_on_startup(
+    monkeypatch: Any, minimal_config_yaml: str
+) -> None:
+    """When no session_manager is injected the factory builds one and the
+    lifespan hooks call ``connect`` on startup and ``disconnect`` on shutdown.
+    """
+    fake = _FakeClient()
+    monkeypatch.setattr(
+        session_module,
+        "_default_factory",
+        lambda session_path, api_id, api_hash: fake,
+    )
+
+    config = load_config_from_text(minimal_config_yaml)
+    app = create_app(config)
+
+    # Lifespan hooks only run inside a TestClient context.
+    with TestClient(app) as client:
+        # Startup happened: connect was called via get_client().
+        assert fake.connect_calls >= 1
+        response = client.get("/health")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["telegram_session"] == "authorized"
+        assert body["default_folder"] == "ok"
+
+    # After the context exits the shutdown hook disconnected the client.
+    assert fake.disconnect_calls >= 1
+
+
+def test_create_app_skips_lifespan_when_explicit_session_manager_passed(
+    minimal_config_yaml: str,
+) -> None:
+    """If the caller wires their own session_manager (the test path) the
+    factory must not auto-construct another one — the explicit manager is
+    authoritative and lifespan stays a no-op.
+    """
+    config = load_config_from_text(minimal_config_yaml)
+
+    # Passing session_manager=None *implicitly* triggers auto-construction.
+    # Passing an actual manager opts out. We assert opt-out by checking that
+    # the app boots without invoking any Telethon factory.
+    class _Sentinel:
+        def __init__(self) -> None:
+            self.connect_attempts = 0
+
+        async def get_client(self) -> Any:
+            self.connect_attempts += 1
+            return self
+
+    sentinel = _Sentinel()
+    app = create_app(config, session_manager=sentinel)  # type: ignore[arg-type]
+    with TestClient(app) as client:
+        response = client.get("/health")
+        assert response.status_code == 200
+
+    # The lifespan does not call get_client on explicitly-supplied managers.
+    assert sentinel.connect_attempts == 0

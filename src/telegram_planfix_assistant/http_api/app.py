@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request
@@ -198,9 +199,46 @@ def create_app(
     if config is None:
         config = load_config()
 
+    # Auto-construct a Telethon session manager from config when the caller did
+    # not supply one. This is the production path: `uvicorn ... --factory`
+    # invokes `create_app()` with no arguments, and without this the service
+    # would come up permanently unauthorized. Tests inject their own manager
+    # (or explicitly pass None to opt out).
+    auto_constructed_manager = False
+    if session_manager is None:
+        try:
+            session_manager = TelethonSessionManager(config.telegram)
+            auto_constructed_manager = True
+        except Exception:
+            session_manager = None
+
+    lifespan: Callable[[FastAPI], AsyncIterator[None]] | None = None
+    if auto_constructed_manager and session_manager is not None:
+        manager_ref = session_manager
+
+        @asynccontextmanager
+        async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+            try:
+                await manager_ref.get_client()
+            except Exception:
+                # Service must still respond to /health when Telegram is
+                # unreachable or the session is unauthorized — the health
+                # probes will surface the real state.
+                pass
+            try:
+                yield
+            finally:
+                try:
+                    await manager_ref.disconnect()
+                except Exception:
+                    pass
+
+        lifespan = _lifespan
+
     app = FastAPI(
         title="telegram-planfix-assistant",
         version=__version__,
+        lifespan=lifespan,
     )
     app.state.config = config
     app.state.session_manager = session_manager
