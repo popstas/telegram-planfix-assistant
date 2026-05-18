@@ -247,15 +247,15 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 12: Bulk remove members (HTTP + CLI)
 
-- [ ] implement `POST /telegram/groups/{chat_id}/members/bulk-remove` and `telegram-planfix-assistant members bulk-remove`
-- [ ] accept JSON and `--file <path>` CSV with column `user`
-- [ ] default `mode = ban_unban` so users are removed but not blacklisted permanently
-- [ ] support `--dry-run` in CLI: report the intended action per user without performing it
-- [ ] require `--force` to remove technical accounts or `@planfix_bot`
-- [ ] require `--yes` to confirm destructive bulk removal in CLI
-- [ ] handle the Telegram service message about removal cleanly in logs
-- [ ] write tests for happy path, `--dry-run`, `--force` guard, refused-without-`--yes` CLI behavior, `continue_on_error`
-- [ ] run project tests - must pass before next task
+- [x] implement `POST /telegram/groups/{chat_id}/members/bulk-remove` and `telegram-planfix-assistant members bulk-remove`
+- [x] accept JSON and `--file <path>` CSV with column `user`
+- [x] default `mode = ban_unban` so users are removed but not blacklisted permanently
+- [x] support `--dry-run` in CLI: report the intended action per user without performing it
+- [x] require `--force` to remove technical accounts or `@planfix_bot`
+- [x] require `--yes` to confirm destructive bulk removal in CLI
+- [x] handle the Telegram service message about removal cleanly in logs
+- [x] write tests for happy path, `--dry-run`, `--force` guard, refused-without-`--yes` CLI behavior, `continue_on_error`
+- [x] run project tests - must pass before next task
 
 ### Task 13: Send message/command (HTTP + CLI)
 

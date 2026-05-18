@@ -14,6 +14,7 @@ from typing import Any
 
 from telegram_planfix_assistant.members.service import (
     MemberAlreadyPresentError,
+    MemberNotPresentError,
     MemberPrivacyError,
 )
 
@@ -31,6 +32,11 @@ _ALREADY_PRESENT_RPC_ERRORS = {
     "UserAlreadyParticipantError",
 }
 
+_NOT_PRESENT_RPC_ERRORS = {
+    "UserNotParticipantError",
+    "ParticipantIdInvalidError",
+}
+
 
 def _classify_rpc_error(exc: Exception) -> Exception:
     name = type(exc).__name__
@@ -38,6 +44,8 @@ def _classify_rpc_error(exc: Exception) -> Exception:
         return MemberPrivacyError(str(exc) or name)
     if name in _ALREADY_PRESENT_RPC_ERRORS:
         return MemberAlreadyPresentError(str(exc) or name)
+    if name in _NOT_PRESENT_RPC_ERRORS:
+        return MemberNotPresentError(str(exc) or name)
     return exc
 
 
@@ -87,3 +95,41 @@ class TelethonMemberBackend:
                 rank="admin",
             )
         )
+
+    async def ban_member(self, *, chat_id: int, user: str) -> None:
+        from telethon.tl.functions.channels import EditBannedRequest
+        from telethon.tl.types import ChatBannedRights
+
+        channel = await self._client.get_input_entity(chat_id)
+        member = await self._client.get_input_entity(user)
+        banned = ChatBannedRights(
+            until_date=None,
+            view_messages=True,
+            send_messages=True,
+            send_media=True,
+            send_stickers=True,
+            send_gifs=True,
+            send_games=True,
+            send_inline=True,
+            embed_links=True,
+        )
+        try:
+            await self._client(
+                EditBannedRequest(channel=channel, participant=member, banned_rights=banned)
+            )
+        except Exception as exc:
+            raise _classify_rpc_error(exc) from exc
+
+    async def unban_member(self, *, chat_id: int, user: str) -> None:
+        from telethon.tl.functions.channels import EditBannedRequest
+        from telethon.tl.types import ChatBannedRights
+
+        channel = await self._client.get_input_entity(chat_id)
+        member = await self._client.get_input_entity(user)
+        cleared = ChatBannedRights(until_date=None)
+        try:
+            await self._client(
+                EditBannedRequest(channel=channel, participant=member, banned_rights=cleared)
+            )
+        except Exception as exc:
+            raise _classify_rpc_error(exc) from exc
