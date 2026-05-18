@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 import typer
 
 from telegram_planfix_assistant import __version__
+from telegram_planfix_assistant.config import ConfigError, load_config
+from telegram_planfix_assistant.telegram_client.session import (
+    TelethonSessionManager,
+)
 
 app = typer.Typer(
     name="telegram-planfix-assistant",
@@ -25,15 +32,68 @@ def _placeholder(group: str, action: str) -> None:
 
 # --- auth -------------------------------------------------------------------
 
-auth_app = typer.Typer(help="Telethon session management.", no_args_is_help=True)
-app.add_typer(auth_app, name="auth")
+
+def _format_me(me: object) -> str:
+    parts: list[str] = []
+    for attr in ("id", "username", "phone", "first_name", "last_name"):
+        value = getattr(me, attr, None)
+        if value:
+            parts.append(f"{attr}={value}")
+    return ", ".join(parts) if parts else repr(me)
 
 
-@auth_app.callback(invoke_without_command=True)
-def auth_root(ctx: typer.Context) -> None:
-    """Run interactive Telethon login (Task 2)."""
-    if ctx.invoked_subcommand is None:
-        _placeholder("auth", "login")
+def _build_session_manager(config_path: Path | None) -> TelethonSessionManager:
+    try:
+        config = load_config(config_path)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    return TelethonSessionManager(config.telegram)
+
+
+@app.command("auth")
+def auth_cmd(
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Interactive Telethon login for the technical account."""
+    manager = _build_session_manager(config_path)
+
+    async def _run() -> None:
+        state = await manager.state()
+        if state.authorized:
+            typer.echo(
+                "Telethon session already authorized: "
+                f"{_format_me(state.me)} "
+                f"(label={state.account_label}, session={state.session_path})"
+            )
+            await manager.disconnect()
+            return
+
+        typer.echo(
+            f"Starting interactive login for label '{state.account_label}'. "
+            f"Session will be stored at: {state.session_path}"
+        )
+        new_state = await manager.interactive_login()
+        typer.echo(
+            "Login successful: "
+            f"{_format_me(new_state.me)} (session={new_state.session_path})"
+        )
+        await manager.disconnect()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:  # pragma: no cover - interactive only
+        typer.echo("Aborted.", err=True)
+        raise typer.Exit(code=130) from None
+    except Exception as exc:  # pragma: no cover - depends on Telegram
+        typer.echo(f"Auth failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 # --- health -----------------------------------------------------------------
