@@ -228,16 +228,184 @@ folders_app = typer.Typer(help="Inspect and manage chat folders.", no_args_is_he
 app.add_typer(folders_app, name="folders")
 
 
+def _build_folder_backend(config_path: Path | None):
+    """Construct a Telethon-backed folder backend for CLI invocations.
+
+    Importing the adapter lazily keeps `folders --help` working in
+    environments where Telethon is partially unavailable, and keeps the
+    placeholder commands cheap.
+    """
+    config = _load_config_or_exit(config_path)
+    manager = TelethonSessionManager(config.telegram)
+    from telegram_planfix_assistant.folders import TelethonFolderBackend
+
+    async def _open():
+        client = await manager.get_client()
+        if not await client.is_user_authorized():
+            raise RuntimeError(
+                "Telethon session is not authorized; run "
+                "`telegram-planfix-assistant auth` first."
+            )
+        return TelethonFolderBackend(client)
+
+    return config, manager, _open
+
+
+def _resolve_folder_name(
+    explicit: str | None,
+    config_path: Path | None,
+) -> tuple[str, int | None, Path | None]:
+    """Resolve `--folder-name`, falling back to the configured default folder."""
+    if explicit:
+        return explicit, None, config_path
+    config = _load_config_or_exit(config_path)
+    default = config.telegram.default_chat_folder
+    return default.folder_name, default.folder_id, config_path
+
+
 @folders_app.command("inspect")
-def folders_inspect() -> None:
-    """Inspect a chat folder (Task 6)."""
-    _placeholder("folders", "inspect")
+def folders_inspect(
+    folder_name: str | None = typer.Option(
+        None,
+        "--folder-name",
+        help="Folder name to inspect (defaults to telegram.default_chat_folder.folder_name).",
+    ),
+    folder_id: int | None = typer.Option(
+        None,
+        "--folder-id",
+        help="Optional folder id cross-check.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Inspect a chat folder and list its chats."""
+    from telegram_planfix_assistant.folders import (
+        FolderError,
+        inspect_folder,
+    )
+
+    resolved_name, default_fid, cfg_path = _resolve_folder_name(
+        folder_name, config_path
+    )
+    effective_fid = folder_id if folder_id is not None else default_fid
+    _config, manager, open_backend = _build_folder_backend(cfg_path)
+
+    async def _run() -> dict[str, object]:
+        try:
+            backend = await open_backend()
+            snapshot = await inspect_folder(
+                backend, folder_name=resolved_name, folder_id=effective_fid
+            )
+            return snapshot.to_dict()
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        payload = asyncio.run(_run())
+    except FolderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"folders inspect failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True))
 
 
 @folders_app.command("add-chat")
-def folders_add_chat() -> None:
-    """Move an existing chat into a folder (Task 6)."""
-    _placeholder("folders", "add-chat")
+def folders_add_chat(
+    folder_name: str | None = typer.Option(
+        None,
+        "--folder-name",
+        help="Folder name (defaults to telegram.default_chat_folder.folder_name).",
+    ),
+    chat_name: str | None = typer.Option(
+        None,
+        "--chat-name",
+        help="Chat title (must match exactly one existing chat).",
+    ),
+    chat_id: int | None = typer.Option(
+        None,
+        "--chat-id",
+        help="Numeric Telegram chat id.",
+    ),
+    folder_id: int | None = typer.Option(
+        None,
+        "--folder-id",
+        help="Optional folder id cross-check.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Move an existing chat into a folder."""
+    from telegram_planfix_assistant.folders import (
+        FolderError,
+        add_chat_to_folder,
+        resolve_chat_in_folder,
+    )
+
+    if (chat_id is None) == (chat_name is None):
+        typer.echo(
+            "exactly one of --chat-id or --chat-name must be supplied", err=True
+        )
+        raise typer.Exit(code=2)
+
+    resolved_name, default_fid, cfg_path = _resolve_folder_name(
+        folder_name, config_path
+    )
+    effective_fid = folder_id if folder_id is not None else default_fid
+    _config, manager, open_backend = _build_folder_backend(cfg_path)
+
+    async def _run() -> dict[str, object]:
+        try:
+            backend = await open_backend()
+            if chat_id is not None:
+                chat_ref: str | int = chat_id
+            else:
+                # chat_name -> chat_id resolution shares the same code path as
+                # the HTTP endpoint so ambiguous names fail loudly the same way.
+                resolved = await resolve_chat_in_folder(
+                    backend,
+                    folder_name=resolved_name,
+                    chat_name=chat_name or "",
+                    folder_id=effective_fid,
+                )
+                chat_ref = resolved.chat_id
+            return await add_chat_to_folder(
+                backend,
+                folder_name=resolved_name,
+                chat_ref=chat_ref,
+                folder_id=effective_fid,
+            )
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        payload = asyncio.run(_run())
+    except FolderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"folders add-chat failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True))
 
 
 # --- operations -------------------------------------------------------------

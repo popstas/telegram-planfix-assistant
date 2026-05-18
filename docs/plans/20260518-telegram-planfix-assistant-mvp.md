@@ -179,13 +179,13 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 6: Chat folder resolution and operations
 
-- [ ] implement helper that resolves `--folder-name` (and optional `folder_id` cross-check) to a Telegram folder peer list, returning a clear error if missing — never auto-create
-- [ ] implement helper that resolves `--chat-name` within a folder to a `telegram_chat_id`; ambiguous matches must fail with the list of duplicates
-- [ ] implement `GET /telegram/folders/{folder_name}` + `telegram-planfix-assistant folders inspect --folder-name <name>` returning `folder_id`, `folder_name`, `chats_count`, `chats`
-- [ ] implement `POST /telegram/folders/{folder_name}/chats` + `telegram-planfix-assistant folders add-chat --folder-name <name> --chat-name <name>` to move an existing chat into a folder
-- [ ] mark per-peer folder failures as `needs_review` rather than silent success
-- [ ] write tests for folder resolution (found / missing / `folder_id` mismatch), chat-name resolution (unique / ambiguous / missing), inspect, and add-chat
-- [ ] run project tests - must pass before next task
+- [x] implement helper that resolves `--folder-name` (and optional `folder_id` cross-check) to a Telegram folder peer list, returning a clear error if missing — never auto-create
+- [x] implement helper that resolves `--chat-name` within a folder to a `telegram_chat_id`; ambiguous matches must fail with the list of duplicates
+- [x] implement `GET /telegram/folders/{folder_name}` + `telegram-planfix-assistant folders inspect --folder-name <name>` returning `folder_id`, `folder_name`, `chats_count`, `chats`
+- [x] implement `POST /telegram/folders/{folder_name}/chats` + `telegram-planfix-assistant folders add-chat --folder-name <name> --chat-name <name>` to move an existing chat into a folder
+- [x] mark per-peer folder failures as `needs_review` rather than silent success
+- [x] write tests for folder resolution (found / missing / `folder_id` mismatch), chat-name resolution (unique / ambiguous / missing), inspect, and add-chat
+- [x] run project tests - must pass before next task
 
 ### Task 7: Group create (HTTP + CLI)
 
