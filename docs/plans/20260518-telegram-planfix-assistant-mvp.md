@@ -202,14 +202,14 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 8: Single topic create (HTTP + CLI)
 
-- [ ] implement `POST /telegram/topics` and `telegram-planfix-assistant topics create`
-- [ ] support CLI `--chat-id` or `--chat-name` + `--folder-name` resolution
-- [ ] support CLI `--topic-name`
-- [ ] first-message logic: `/task {planfix_task_id}` if id present, else `message` if provided, else duplicate the topic name
-- [ ] persist `planfix_task_id → telegram_chat_id + telegram_topic_id` mapping when present
-- [ ] enforce idempotency: same `planfix_task_id` returns existing topic; without it, `telegram_chat_id + topic_name` is the key
-- [ ] write tests for all three first-message branches, idempotent re-calls, `--chat-name` resolution
-- [ ] run project tests - must pass before next task
+- [x] implement `POST /telegram/topics` and `telegram-planfix-assistant topics create`
+- [x] support CLI `--chat-id` or `--chat-name` + `--folder-name` resolution
+- [x] support CLI `--topic-name`
+- [x] first-message logic: `/task {planfix_task_id}` if id present, else `message` if provided, else duplicate the topic name
+- [x] persist `planfix_task_id → telegram_chat_id + telegram_topic_id` mapping when present
+- [x] enforce idempotency: same `planfix_task_id` returns existing topic; without it, `telegram_chat_id + topic_name` is the key
+- [x] write tests for all three first-message branches, idempotent re-calls, `--chat-name` resolution
+- [x] run project tests - must pass before next task
 
 ### Task 9: Bulk topic create (HTTP + CLI)
 
