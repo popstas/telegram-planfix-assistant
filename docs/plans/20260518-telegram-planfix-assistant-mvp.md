@@ -235,15 +235,15 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 11: Bulk add members (HTTP + CLI)
 
-- [ ] implement `POST /telegram/groups/{chat_id}/members/bulk-add` and `telegram-planfix-assistant members bulk-add`
-- [ ] accept JSON and `--file <path>` CSV with columns `user,role`
-- [ ] accept user references as `@username`, phone/contact ID, or numeric Telegram user ID where MTProto permits
-- [ ] support CLI `--chat-id` or `--chat-name` + `--folder-name`
-- [ ] promote to admin when `role = admin`
-- [ ] handle Telegram privacy restrictions per user without failing the batch when `continue_on_error = true`
-- [ ] log the failure reason per user
-- [ ] write tests covering admin promotion, privacy-restricted user, already-present user, `continue_on_error` behavior
-- [ ] run project tests - must pass before next task
+- [x] implement `POST /telegram/groups/{chat_id}/members/bulk-add` and `telegram-planfix-assistant members bulk-add`
+- [x] accept JSON and `--file <path>` CSV with columns `user,role`
+- [x] accept user references as `@username`, phone/contact ID, or numeric Telegram user ID where MTProto permits
+- [x] support CLI `--chat-id` or `--chat-name` + `--folder-name`
+- [x] promote to admin when `role = admin`
+- [x] handle Telegram privacy restrictions per user without failing the batch when `continue_on_error = true`
+- [x] log the failure reason per user
+- [x] write tests covering admin promotion, privacy-restricted user, already-present user, `continue_on_error` behavior
+- [x] run project tests - must pass before next task
 
 ### Task 12: Bulk remove members (HTTP + CLI)
 

@@ -856,10 +856,256 @@ members_app = typer.Typer(help="Manage group membership.", no_args_is_help=True)
 app.add_typer(members_app, name="members")
 
 
+def _build_member_backends(config_path: Path | None):
+    """Open the Telethon-backed member + folder backends + store for the CLI.
+
+    Mirrors :func:`_build_topic_backends`: lazy Telethon imports keep
+    ``members bulk-add --help`` cheap.
+    """
+    config = _load_config_or_exit(config_path)
+    manager = TelethonSessionManager(config.telegram)
+    store = OperationStore(default_database_path(config))
+
+    async def _open():
+        from telegram_planfix_assistant.folders import TelethonFolderBackend
+        from telegram_planfix_assistant.members.telethon_backend import (
+            TelethonMemberBackend,
+        )
+
+        client = await manager.get_client()
+        if not await client.is_user_authorized():
+            raise RuntimeError(
+                "Telethon session is not authorized; run "
+                "`telegram-planfix-assistant auth` first."
+            )
+        return TelethonMemberBackend(client), TelethonFolderBackend(client)
+
+    return config, manager, store, _open
+
+
+def _parse_bulk_members_csv(path: Path) -> list[dict[str, object]]:
+    """Read a `user,role` CSV into bulk items.
+
+    ``role`` defaults to ``"member"`` when the column is missing or empty.
+    Lines starting with ``#`` and blank rows are ignored so operators can
+    keep notes alongside the data.
+    """
+    import csv
+
+    out: list[dict[str, object]] = []
+    with path.open(newline="", encoding="utf-8") as fp:
+        reader = csv.DictReader(fp)
+        if reader.fieldnames is None or "user" not in set(reader.fieldnames):
+            raise typer.BadParameter(
+                f"CSV must have at least column 'user'; got {reader.fieldnames!r}"
+            )
+        for row in reader:
+            user = (row.get("user") or "").strip()
+            if not user or user.startswith("#"):
+                continue
+            role = (row.get("role") or "member").strip() or "member"
+            out.append({"user": user, "role": role})
+    if not out:
+        raise typer.BadParameter("CSV produced zero items")
+    return out
+
+
+def _parse_bulk_members_json(path: Path) -> list[dict[str, object]]:
+    """Read a JSON list of `{user, role?}`."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise typer.BadParameter("JSON file must contain a top-level list")
+    out: list[dict[str, object]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise typer.BadParameter("each JSON entry must be an object")
+        user = str(entry.get("user") or "").strip()
+        if not user:
+            raise typer.BadParameter("each entry needs a non-empty user")
+        role = str(entry.get("role") or "member").strip() or "member"
+        out.append({"user": user, "role": role})
+    if not out:
+        raise typer.BadParameter("JSON file produced zero items")
+    return out
+
+
 @members_app.command("bulk-add")
-def members_bulk_add() -> None:
-    """Bulk-add members (Task 11)."""
-    _placeholder("members", "bulk-add")
+def members_bulk_add(
+    chat_id: int | None = typer.Option(
+        None,
+        "--chat-id",
+        help="Numeric Telegram chat id of the supergroup.",
+    ),
+    chat_name: str | None = typer.Option(
+        None,
+        "--chat-name",
+        help="Chat title (resolved within --folder-name).",
+    ),
+    folder_name: str | None = typer.Option(
+        None,
+        "--folder-name",
+        help="Folder used for --chat-name lookup "
+        "(defaults to telegram.default_chat_folder.folder_name).",
+    ),
+    folder_id: int | None = typer.Option(
+        None,
+        "--folder-id",
+        help="Optional folder id cross-check.",
+    ),
+    file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--file",
+        help="CSV (user,role) or JSON list of items.",
+        exists=False,
+    ),
+    user: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--user",
+        help="User to add (repeat for multiple). Use --admin to mark as admin.",
+    ),
+    admin: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--admin",
+        help="User to add as admin (repeat for multiple).",
+    ),
+    operation_id: str | None = typer.Option(
+        None,
+        "--operation-id",
+        help="Idempotency id for the bulk; rerunning with the same value resumes the batch.",
+    ),
+    continue_on_error: bool = typer.Option(
+        True,
+        "--continue-on-error/--stop-on-error",
+        help="Continue the batch after a single-item failure (default true).",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Bulk-add members to an existing supergroup, optionally promoting to admin."""
+    from telegram_planfix_assistant.folders import (
+        FolderError,
+        resolve_chat_in_folder,
+    )
+    from telegram_planfix_assistant.members import (
+        BulkMemberAddFailed,
+        BulkMemberAddNeedsReview,
+        BulkMemberAddPending,
+        BulkMemberAddRequest,
+        BulkMemberItem,
+        bulk_add_members,
+    )
+    from telegram_planfix_assistant.worker.queue import WorkerQueue
+
+    if (chat_id is None) == (chat_name is None):
+        typer.echo(
+            "exactly one of --chat-id or --chat-name must be supplied", err=True
+        )
+        raise typer.Exit(code=2)
+
+    raw_items: list[dict[str, object]] = []
+    if file is not None:
+        if not file.exists():
+            typer.echo(f"--file path does not exist: {file}", err=True)
+            raise typer.Exit(code=2)
+        raw_items.extend(
+            _parse_bulk_members_json(file)
+            if file.suffix.lower() == ".json"
+            else _parse_bulk_members_csv(file)
+        )
+    for u in user or []:
+        raw_items.append({"user": u, "role": "member"})
+    for u in admin or []:
+        raw_items.append({"user": u, "role": "admin"})
+
+    if not raw_items:
+        typer.echo(
+            "no users supplied: use --file, --user, or --admin", err=True
+        )
+        raise typer.Exit(code=2)
+
+    config, manager, store, open_backends = _build_member_backends(config_path)
+
+    if chat_name is not None:
+        resolved_folder_name, default_fid, _ = _resolve_folder_name(
+            folder_name, config_path
+        )
+        effective_folder_id = folder_id if folder_id is not None else default_fid
+    else:
+        resolved_folder_name = folder_name
+        effective_folder_id = folder_id
+
+    queue = WorkerQueue(
+        store,
+        max_parallel=config.queue.max_parallel_telegram_ops,
+        flood_wait_safety_margin_seconds=config.queue.flood_wait_safety_margin_seconds,
+        default_retry_delay_seconds=config.queue.default_retry_delay_seconds,
+    )
+
+    async def _run() -> dict[str, object]:
+        try:
+            member_backend, folder_backend = await open_backends()
+            if chat_id is not None:
+                resolved_chat_id = chat_id
+            else:
+                resolved = await resolve_chat_in_folder(
+                    folder_backend,
+                    folder_name=resolved_folder_name or "",
+                    chat_name=chat_name or "",
+                    folder_id=effective_folder_id,
+                )
+                resolved_chat_id = resolved.chat_id
+
+            try:
+                items = tuple(
+                    BulkMemberItem(user=str(it["user"]), role=str(it["role"]))
+                    for it in raw_items
+                )
+            except ValueError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(code=2) from exc
+            req = BulkMemberAddRequest(
+                telegram_chat_id=resolved_chat_id,
+                items=items,
+                continue_on_error=continue_on_error,
+                operation_id=operation_id,
+            )
+            result, op = await bulk_add_members(
+                backend=member_backend,
+                store=store,
+                queue=queue,
+                request=req,
+            )
+            payload = result.to_dict()
+            payload["operation_status"] = op.status.value
+            return payload
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        payload = asyncio.run(_run())
+    except (
+        BulkMemberAddPending,
+        BulkMemberAddNeedsReview,
+        BulkMemberAddFailed,
+    ) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except FolderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"members bulk-add failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
 @members_app.command("bulk-remove")

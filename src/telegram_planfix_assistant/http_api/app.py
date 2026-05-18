@@ -15,7 +15,9 @@ from telegram_planfix_assistant.health import collect_health, default_database_p
 from telegram_planfix_assistant.http_api.auth import BearerAuth
 from telegram_planfix_assistant.http_api.folders import build_router as build_folders_router
 from telegram_planfix_assistant.http_api.groups import build_router as build_groups_router
+from telegram_planfix_assistant.http_api.members import build_router as build_members_router
 from telegram_planfix_assistant.http_api.topics import build_router as build_topics_router
+from telegram_planfix_assistant.members import MemberAddBackend
 from telegram_planfix_assistant.persistence.store import OperationStore
 from telegram_planfix_assistant.telegram_client.session import (
     TelethonSessionManager,
@@ -25,6 +27,7 @@ from telegram_planfix_assistant.topics import TopicBackend
 FolderBackendFactory = Callable[[Request], FolderBackend | None]
 GroupBackendFactory = Callable[[Request], GroupBackend | None]
 TopicBackendFactory = Callable[[Request], TopicBackend | None]
+MemberBackendFactory = Callable[[Request], MemberAddBackend | None]
 
 
 def _build_health_router() -> APIRouter:
@@ -112,6 +115,26 @@ def _default_topic_backend_factory(
     return _factory
 
 
+def _default_member_backend_factory(
+    session_manager: TelethonSessionManager | None,
+) -> MemberBackendFactory:
+    """Build a Telethon-backed member backend factory."""
+
+    def _factory(_request: Request) -> MemberAddBackend | None:
+        if session_manager is None:
+            return None
+        client = getattr(session_manager, "_client", None)
+        if client is None:
+            return None
+        from telegram_planfix_assistant.members.telethon_backend import (
+            TelethonMemberBackend,
+        )
+
+        return TelethonMemberBackend(client)
+
+    return _factory
+
+
 def _default_group_backend_factory(
     session_manager: TelethonSessionManager | None,
 ) -> GroupBackendFactory:
@@ -145,6 +168,7 @@ def create_app(
     folder_backend_factory: FolderBackendFactory | None = None,
     group_backend_factory: GroupBackendFactory | None = None,
     topic_backend_factory: TopicBackendFactory | None = None,
+    member_backend_factory: MemberBackendFactory | None = None,
     operation_store: OperationStore | None = None,
 ) -> FastAPI:
     """Build a FastAPI instance.
@@ -185,6 +209,11 @@ def create_app(
         if topic_backend_factory is not None
         else _default_topic_backend_factory(session_manager)
     )
+    app.state.member_backend_factory = (
+        member_backend_factory
+        if member_backend_factory is not None
+        else _default_member_backend_factory(session_manager)
+    )
     if operation_store is not None:
         app.state.operation_store = operation_store
     else:
@@ -206,5 +235,6 @@ def create_app(
     app.include_router(build_folders_router(), prefix="/telegram")
     app.include_router(build_groups_router(), prefix="/telegram")
     app.include_router(build_topics_router(), prefix="/telegram")
+    app.include_router(build_members_router(), prefix="/telegram")
 
     return app
