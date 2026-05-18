@@ -225,13 +225,13 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 10: Close topic (HTTP + CLI)
 
-- [ ] implement `POST /telegram/topics/{topic_id}/close` and `telegram-planfix-assistant topics close`
-- [ ] support CLI `--topic-id` or `--topic-name` (within the resolved chat)
-- [ ] do not delete topic or history
-- [ ] make re-close idempotent (re-call returns `closed`)
-- [ ] support optional `reason` field passed through to logs
-- [ ] write tests for happy path, idempotent re-close, `--topic-name` resolution including ambiguous matches
-- [ ] run project tests - must pass before next task
+- [x] implement `POST /telegram/topics/{topic_id}/close` and `telegram-planfix-assistant topics close`
+- [x] support CLI `--topic-id` or `--topic-name` (within the resolved chat)
+- [x] do not delete topic or history
+- [x] make re-close idempotent (re-call returns `closed`)
+- [x] support optional `reason` field passed through to logs
+- [x] write tests for happy path, idempotent re-close, `--topic-name` resolution including ambiguous matches
+- [x] run project tests - must pass before next task
 
 ### Task 11: Bulk add members (HTTP + CLI)
 

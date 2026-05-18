@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from telegram_planfix_assistant.topics.service import TopicSummary
+
 
 def _extract_topic_id(updates: Any) -> int:
     """Find the new topic id inside the Telethon ``Updates`` result.
@@ -48,3 +50,37 @@ class TelethonTopicBackend:
             kwargs["reply_to"] = topic_id
         sent = await self._client.send_message(chat_id, text, **kwargs)
         return int(getattr(sent, "id", 0))
+
+    async def close_topic(self, *, chat_id: int, topic_id: int) -> None:
+        from telethon.tl.functions.channels import EditForumTopicRequest
+
+        channel = await self._client.get_input_entity(chat_id)
+        await self._client(
+            EditForumTopicRequest(
+                channel=channel,
+                topic_id=topic_id,
+                closed=True,
+            )
+        )
+
+    async def list_topics(self, *, chat_id: int) -> list[TopicSummary]:
+        from telethon.tl.functions.channels import GetForumTopicsRequest
+
+        channel = await self._client.get_input_entity(chat_id)
+        result = await self._client(
+            GetForumTopicsRequest(
+                channel=channel,
+                offset_date=None,
+                offset_id=0,
+                offset_topic=0,
+                limit=100,
+            )
+        )
+        out: list[TopicSummary] = []
+        for topic in getattr(result, "topics", None) or []:
+            topic_id = getattr(topic, "id", None)
+            title = getattr(topic, "title", None)
+            closed = bool(getattr(topic, "closed", False))
+            if isinstance(topic_id, int) and isinstance(title, str):
+                out.append(TopicSummary(topic_id=topic_id, title=title, closed=closed))
+        return out
