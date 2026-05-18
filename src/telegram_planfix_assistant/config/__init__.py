@@ -6,6 +6,7 @@ from telegram_planfix_assistant.config.loader import (
     load_config_from_text,
 )
 from telegram_planfix_assistant.config.models import (
+    AlertsConfig,
     AppConfig,
     DefaultChatFolderConfig,
     HttpConfig,
@@ -16,6 +17,7 @@ from telegram_planfix_assistant.config.models import (
 )
 
 __all__ = [
+    "AlertsConfig",
     "AppConfig",
     "ConfigError",
     "DefaultChatFolderConfig",
