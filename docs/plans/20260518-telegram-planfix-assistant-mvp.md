@@ -142,12 +142,12 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 2: Telethon session and `auth` CLI
 
-- [ ] implement Telethon session wrapper reading `api_id`, `api_hash`, `session_path` from config
-- [ ] implement `telegram-planfix-assistant auth` interactive login (phone, code, optional 2FA password) writing session to configured path
-- [ ] make re-running `auth` show the current authorized account and not re-prompt unnecessarily
-- [ ] expose a single shared Telethon client used by HTTP, CLI, and worker
-- [ ] write tests for session state detection (unauthorized vs authorized) using mock Telethon client
-- [ ] run project tests - must pass before next task
+- [x] implement Telethon session wrapper reading `api_id`, `api_hash`, `session_path` from config
+- [x] implement `telegram-planfix-assistant auth` interactive login (phone, code, optional 2FA password) writing session to configured path
+- [x] make re-running `auth` show the current authorized account and not re-prompt unnecessarily
+- [x] expose a single shared Telethon client used by HTTP, CLI, and worker
+- [x] write tests for session state detection (unauthorized vs authorized) using mock Telethon client
+- [x] run project tests - must pass before next task
 
 ### Task 3: Healthcheck (HTTP + CLI)
 
