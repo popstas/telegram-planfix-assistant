@@ -319,6 +319,12 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 - [x] create new client chat `Client chat test 2`, add topics 'Topic 1', 'Topic 2', 'Topic 3', add user `@popstas` (scripted in scripts/e2e_test.sh; live verification needs real Telegram credentials — manual step)
 - [x] run web server and test http endpoints against the test account (instructions in scripts/e2e_test.sh header; live run needs real Telegram credentials — manual step)
 
+### Task 18: End-to-end testing with credentials
+- [ ] use data/sessions/expertizemeAssistant/session.session for the test account (session_path wired in data/config.yml, api_id and api_hash filled at date/config.yml)
+- [ ] use folder `Clients`, chat `Client chat test`, test actions against the test account (folder + chat baked into scripts/e2e_test.sh defaults; live verification needs real Telegram credentials — manual step)
+- [ ] create new client chat `Client chat test 2`, add topics 'Topic 1', 'Topic 2', 'Topic 3', add user `@popstas` (scripted in scripts/e2e_test.sh; live verification needs real Telegram credentials — manual step)
+- [ ] run web server and test http endpoints against the test account (instructions in scripts/e2e_test.sh header; live run needs real Telegram credentials — manual step)
+
 ## Post-Completion
 
 *Items requiring manual intervention - no checkboxes, informational only*
