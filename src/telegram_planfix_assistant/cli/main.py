@@ -162,10 +162,176 @@ groups_app = typer.Typer(help="Manage Telegram supergroups.", no_args_is_help=Tr
 app.add_typer(groups_app, name="groups")
 
 
+def _build_group_backends(config_path: Path | None):
+    """Open the Telethon-backed group + folder backends + store for the CLI.
+
+    Mirrors :func:`_build_folder_backend` but for group creation: we lazily
+    import the Telethon adapter so `groups create --help` works in
+    environments where Telethon is partially installed, and so the placeholder
+    commands stay cheap.
+    """
+    config = _load_config_or_exit(config_path)
+    manager = TelethonSessionManager(config.telegram)
+    store = OperationStore(default_database_path(config))
+
+    async def _open():
+        from telegram_planfix_assistant.folders import TelethonFolderBackend
+        from telegram_planfix_assistant.groups.telethon_backend import (
+            TelethonGroupBackend,
+        )
+
+        client = await manager.get_client()
+        if not await client.is_user_authorized():
+            raise RuntimeError(
+                "Telethon session is not authorized; run "
+                "`telegram-planfix-assistant auth` first."
+            )
+        return TelethonGroupBackend(client), TelethonFolderBackend(client)
+
+    return config, manager, store, _open
+
+
 @groups_app.command("create")
-def groups_create() -> None:
-    """Create a supergroup (Task 7)."""
-    _placeholder("groups", "create")
+def groups_create(
+    title: str = typer.Option(..., "--title", help="Group title."),
+    planfix_task_id: str | None = typer.Option(
+        None,
+        "--planfix-task-id",
+        help="Planfix task id; used as the primary idempotency key when set.",
+    ),
+    about: str | None = typer.Option(
+        None,
+        "--about",
+        help="Optional 'about' text for the supergroup.",
+    ),
+    admin: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--admin",
+        help="User to add as admin (repeat for multiple).",
+    ),
+    member: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--member",
+        help="User to add as a regular member (repeat for multiple).",
+    ),
+    reserve_admin: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--reserve-admin",
+        help="Extra reserve-admin to add on top of the configured defaults.",
+    ),
+    reserve_member: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--reserve-member",
+        help="Extra reserve-member to add on top of the configured defaults.",
+    ),
+    no_reserve: bool = typer.Option(
+        False,
+        "--no-reserve",
+        help="Skip the configured reserve_admins / reserve_members.",
+    ),
+    no_invite_link: bool = typer.Option(
+        False,
+        "--no-invite-link",
+        help="Do not create an invite link even if defaults allow it.",
+    ),
+    no_topics: bool = typer.Option(
+        False,
+        "--no-topics",
+        help="Do not enable topics even if defaults allow it.",
+    ),
+    folder_name: str | None = typer.Option(
+        None,
+        "--folder-name",
+        help="Target folder (defaults to telegram.default_chat_folder.folder_name).",
+    ),
+    folder_id: int | None = typer.Option(
+        None,
+        "--folder-id",
+        help="Optional folder id cross-check.",
+    ),
+    skip_folder: bool = typer.Option(
+        False,
+        "--skip-folder",
+        help="Do not place the new group into any folder.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Create a Telegram supergroup for a Planfix client."""
+    from telegram_planfix_assistant.groups import (
+        GroupCreateFailed,
+        GroupCreateNeedsReview,
+        GroupCreatePending,
+        GroupCreateRequest,
+        create_group,
+    )
+
+    config, manager, store, open_backends = _build_group_backends(config_path)
+
+    # Merge configured reserves with extra ones from CLI: extras add on top.
+    extra_admins = list(reserve_admin or [])
+    extra_members = list(reserve_member or [])
+    if no_reserve:
+        reserve_admins_arg: list[str] | None = list(extra_admins)
+        reserve_members_arg: list[str] | None = list(extra_members)
+    elif extra_admins or extra_members:
+        reserve_admins_arg = list(config.telegram.reserve_admins) + extra_admins
+        reserve_members_arg = list(config.telegram.reserve_members) + extra_members
+    else:
+        reserve_admins_arg = None
+        reserve_members_arg = None
+
+    request = GroupCreateRequest(
+        title=title,
+        planfix_task_id=planfix_task_id,
+        about=about,
+        admins=list(admin or []),
+        members=list(member or []),
+        reserve_admins=reserve_admins_arg,
+        reserve_members=reserve_members_arg,
+        skip_reserve=no_reserve and not (extra_admins or extra_members),
+        enable_topics=False if no_topics else None,
+        create_invite_link=False if no_invite_link else None,
+        folder_name=folder_name,
+        folder_id=folder_id,
+        skip_folder=skip_folder,
+    )
+
+    async def _run() -> dict[str, object]:
+        try:
+            group_backend, folder_backend = await open_backends()
+            result, op = await create_group(
+                backend=group_backend,
+                folder_backend=folder_backend,
+                store=store,
+                config=config.telegram,
+                request=request,
+            )
+            payload = result.to_dict()
+            payload["operation_id"] = op.id
+            payload["operation_status"] = op.status.value
+            return payload
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        payload = asyncio.run(_run())
+    except (GroupCreatePending, GroupCreateNeedsReview, GroupCreateFailed) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"groups create failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
 # --- topics -----------------------------------------------------------------
