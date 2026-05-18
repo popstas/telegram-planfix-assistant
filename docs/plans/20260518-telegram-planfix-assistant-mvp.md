@@ -169,13 +169,13 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 5: Queue and worker with `FLOOD_WAIT` handling
 
-- [ ] implement async worker queue with bounded parallelism (`queue.max_parallel_telegram_ops`)
-- [ ] handle `FLOOD_WAIT` as a graceful pause respecting `flood_wait_safety_margin_seconds` rather than a fatal error
-- [ ] persist per-item progress for bulk operations so a restart resumes from the last incomplete item
-- [ ] implement `telegram-planfix-assistant operations status --operation-id <id>` and `... operations retry --operation-id <id>` CLI commands
-- [ ] surface `needs_review` items in `operations status` output
-- [ ] write tests covering `FLOOD_WAIT` retry, restart resumption, `operations status`, and `operations retry` for failed and `needs_review` items
-- [ ] run project tests - must pass before next task
+- [x] implement async worker queue with bounded parallelism (`queue.max_parallel_telegram_ops`)
+- [x] handle `FLOOD_WAIT` as a graceful pause respecting `flood_wait_safety_margin_seconds` rather than a fatal error
+- [x] persist per-item progress for bulk operations so a restart resumes from the last incomplete item
+- [x] implement `telegram-planfix-assistant operations status --operation-id <id>` and `... operations retry --operation-id <id>` CLI commands
+- [x] surface `needs_review` items in `operations status` output
+- [x] write tests covering `FLOOD_WAIT` retry, restart resumption, `operations status`, and `operations retry` for failed and `needs_review` items
+- [x] run project tests - must pass before next task
 
 ### Task 6: Chat folder resolution and operations
 

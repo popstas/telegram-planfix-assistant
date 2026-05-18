@@ -425,3 +425,113 @@ class OperationStore:
         return self._transition_item(
             item_id, OperationStatus.NEEDS_REVIEW, error=error
         )
+
+    # ------------------------------------------------------------------
+    # public API — retry helpers
+    # ------------------------------------------------------------------
+
+    def reset_operation_for_retry(self, operation_id: str) -> OperationRecord:
+        """Force a failed/needs_review operation back to pending.
+
+        Refuses to reset a completed operation — retrying a successful call
+        would be a footgun, and the idempotency layer already returns the
+        saved result on replay. Pending operations are returned as-is.
+        """
+        now = _utcnow()
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM operations WHERE id = ?", (operation_id,)
+            ).fetchone()
+            if row is None:
+                conn.execute("ROLLBACK")
+                raise OperationNotFoundError(operation_id)
+            current = OperationStatus(row["status"])
+            if current is OperationStatus.COMPLETED:
+                conn.execute("ROLLBACK")
+                raise ValueError(
+                    f"operation {operation_id} is completed; refusing to reset"
+                )
+            if current is OperationStatus.PENDING:
+                conn.execute("ROLLBACK")
+                return self._row_to_operation(row)
+            conn.execute(
+                """
+                UPDATE operations
+                   SET status = ?,
+                       error = NULL,
+                       updated_at = ?
+                 WHERE id = ?
+                """,
+                (OperationStatus.PENDING.value, _iso(now), operation_id),
+            )
+            conn.execute("COMMIT")
+            updated = conn.execute(
+                "SELECT * FROM operations WHERE id = ?", (operation_id,)
+            ).fetchone()
+        return self._row_to_operation(updated)
+
+    def reset_items_for_retry(self, operation_id: str) -> list[OperationItemRecord]:
+        """Reset every non-completed item under `operation_id` to pending.
+
+        Completed items keep their saved results — that's what makes retry safe
+        to invoke on a partially-completed bulk operation.
+        """
+        now = _utcnow()
+        reset_ids: list[str] = []
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                """
+                SELECT id FROM operation_items
+                 WHERE operation_id = ?
+                   AND status IN (?, ?)
+                """,
+                (
+                    operation_id,
+                    OperationStatus.FAILED.value,
+                    OperationStatus.NEEDS_REVIEW.value,
+                ),
+            ).fetchall()
+            for r in rows:
+                conn.execute(
+                    """
+                    UPDATE operation_items
+                       SET status = ?,
+                           error = NULL,
+                           updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (OperationStatus.PENDING.value, _iso(now), r["id"]),
+                )
+                reset_ids.append(r["id"])
+            conn.execute("COMMIT")
+        if not reset_ids:
+            return []
+        with self._connect() as conn:
+            placeholders = ",".join("?" for _ in reset_ids)
+            updated = conn.execute(
+                f"SELECT * FROM operation_items WHERE id IN ({placeholders})",
+                reset_ids,
+            ).fetchall()
+        return [self._row_to_item(r) for r in updated]
+
+    def items_by_status(
+        self, operation_id: str, statuses: Iterable[OperationStatus]
+    ) -> list[OperationItemRecord]:
+        """Items belonging to `operation_id` whose status is in `statuses`."""
+        wanted = [s.value for s in statuses]
+        if not wanted:
+            return []
+        with self._connect() as conn:
+            placeholders = ",".join("?" for _ in wanted)
+            rows = conn.execute(
+                f"""
+                SELECT * FROM operation_items
+                 WHERE operation_id = ?
+                   AND status IN ({placeholders})
+                 ORDER BY created_at
+                """,
+                (operation_id, *wanted),
+            ).fetchall()
+        return [self._row_to_item(r) for r in rows]
