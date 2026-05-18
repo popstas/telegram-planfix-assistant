@@ -159,13 +159,13 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 4: Persistence and idempotency layer
 
-- [ ] design SQLite schema: `operations` (id, type, status, request_payload, result_payload, error, created_at, updated_at), `operation_items` (id, operation_id, idempotency_key, status, result, error), `idempotency_index` (key, operation_id)
-- [ ] implement migrations or schema bootstrap on startup
-- [ ] implement state machine: `pending` → `completed` | `failed` | `needs_review`
-- [ ] implement replay semantics: `completed` returns saved result, `pending` waits up to a configured timeout or returns 503, `failed` returns saved error, `needs_review` does not auto-retry
-- [ ] implement idempotency-key computation per operation type as defined in Technical Details
-- [ ] write tests for replay of each state, for duplicate-key collision behavior, and for the per-item idempotency in bulk operations
-- [ ] run project tests - must pass before next task
+- [x] design SQLite schema: `operations` (id, type, status, request_payload, result_payload, error, created_at, updated_at), `operation_items` (id, operation_id, idempotency_key, status, result, error), `idempotency_index` (key, operation_id)
+- [x] implement migrations or schema bootstrap on startup
+- [x] implement state machine: `pending` → `completed` | `failed` | `needs_review`
+- [x] implement replay semantics: `completed` returns saved result, `pending` waits up to a configured timeout or returns 503, `failed` returns saved error, `needs_review` does not auto-retry
+- [x] implement idempotency-key computation per operation type as defined in Technical Details
+- [x] write tests for replay of each state, for duplicate-key collision behavior, and for the per-item idempotency in bulk operations
+- [x] run project tests - must pass before next task
 
 ### Task 5: Queue and worker with `FLOOD_WAIT` handling
 
