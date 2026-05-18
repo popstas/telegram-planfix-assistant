@@ -320,11 +320,11 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 - [x] run web server and test http endpoints against the test account (instructions in scripts/e2e_test.sh header; live run needs real Telegram credentials — manual step)
 
 ### Task 18: End-to-end testing with credentials
-- [ ] use data/sessions/expertizemeAssistant/session.session for the test account (session_path wired in data/config.yml, api_id and api_hash filled in data/config.yml)
-- [ ] use folder `Clients`, chat `Client chat test`, test actions against the test account (folder + chat baked into scripts/e2e_test.sh defaults) — run scripts/e2e_test.sh automatically, allow external side-effects
-- [ ] create new client chat `Client chat test 2`, add topics 'Topic 1', 'Topic 2', 'Topic 3', add user `@popstas` (scripted in scripts/e2e_test.sh) — run scripts/e2e_test.sh automatically, allow external side-effecting verification
-- [ ] run web server and test http endpoints against the test account (instructions in scripts/e2e_test.sh header) — start uvicorn then run scripts/e2e_test.sh automatically, allow external side-effecting verification
-- [ ] write another e2e test scripts if needed to check all cli commands and http endpoints
+- [x] use data/sessions/expertizemeAssistant/session.session for the test account (session_path wired in data/config.yml, api_id and api_hash filled in data/config.yml)
+- [x] use folder `Clients`, chat `Client chat test`, test actions against the test account (folder + chat baked into scripts/e2e_test.sh defaults) — ran scripts/e2e_test.sh against the live account; folder inspect returned both chats
+- [x] create new client chat `Client chat test 2`, add topics 'Topic 1', 'Topic 2', 'Topic 3', add user `@popstas` (scripted in scripts/e2e_test.sh) — verified live: chat 3911170598, topics 4/6/8, @popstas added
+- [x] run web server and test http endpoints against the test account (instructions in scripts/e2e_test.sh header) — uvicorn factory now auto-wires the Telethon session via lifespan; scripts/e2e_test.sh ran all six HTTP endpoints green
+- [x] write another e2e test scripts if needed to check all cli commands and http endpoints (scripts/e2e_cli_test.sh covers health, folders inspect, topics create/close, messages send targeted+mass, members bulk-remove --dry-run, operations status; scripts/e2e_http_extras_test.sh covers POST /telegram/topics, /topics/{id}/close, /members/bulk-remove + bulk-add round-trip, /folders/{name}/chats)
 
 ## Post-Completion
 
