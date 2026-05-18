@@ -259,13 +259,13 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 13: Send message/command (HTTP + CLI)
 
-- [ ] implement `POST /telegram/messages` and `telegram-planfix-assistant messages send`
-- [ ] support targeted send: `telegram_chat_id` (or `--chat-name` + `--folder-name`) and `telegram_topic_id` (or `--topic-name`)
-- [ ] support mass send: when only `folder_name` + `topic_name` are given, send to every chat in the folder that has a matching topic; skip groups without that topic and mark them `skipped` with reason `topic_not_found`
-- [ ] support sending service commands like `/task <id>` without leaking secrets in logs
-- [ ] return per-item results in mass mode with `chat_name`, `topic_name`, `status`, `telegram_message_id`, and `reason` on skip
-- [ ] write tests for targeted send, mass send across multiple folders, skip-on-missing-topic, service-command send
-- [ ] run project tests - must pass before next task
+- [x] implement `POST /telegram/messages` and `telegram-planfix-assistant messages send`
+- [x] support targeted send: `telegram_chat_id` (or `--chat-name` + `--folder-name`) and `telegram_topic_id` (or `--topic-name`)
+- [x] support mass send: when only `folder_name` + `topic_name` are given, send to every chat in the folder that has a matching topic; skip groups without that topic and mark them `skipped` with reason `topic_not_found`
+- [x] support sending service commands like `/task <id>` without leaking secrets in logs
+- [x] return per-item results in mass mode with `chat_name`, `topic_name`, `status`, `telegram_message_id`, and `reason` on skip
+- [x] write tests for targeted send, mass send across multiple folders, skip-on-missing-topic, service-command send
+- [x] run project tests - must pass before next task
 
 ### Task 14: Structured logging and alert hooks
 

@@ -54,6 +54,32 @@ def member_remove_key(*, telegram_chat_id: int | str, user: str) -> str:
     return f"{MEMBER_BULK_REMOVE}:chat={telegram_chat_id}:user={user}"
 
 
+def message_send_key(
+    *,
+    telegram_chat_id: int | str,
+    telegram_topic_id: int | str | None,
+    operation_id: str | None,
+) -> str:
+    """Key for a single message send.
+
+    Messages have no intrinsic Planfix anchor (a single Planfix task may send
+    many messages over its lifetime), so the caller-supplied ``operation_id``
+    is the only stable idempotency anchor. When no ``operation_id`` is given,
+    a fresh UUID is minted so each call is independent.
+    """
+    if operation_id is not None and str(operation_id).strip():
+        oid = str(operation_id).strip()
+    else:
+        import uuid
+
+        oid = uuid.uuid4().hex
+    topic_part = telegram_topic_id if telegram_topic_id is not None else "-"
+    return (
+        f"{MESSAGE_SEND}:chat={telegram_chat_id}:"
+        f"topic={topic_part}:id={oid}"
+    )
+
+
 def bulk_item_key(*, operation_id: str, per_item_key: str) -> str:
     """Per-item key within a bulk operation, scoped by the parent operation_id."""
     if not operation_id:

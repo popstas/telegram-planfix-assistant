@@ -28,15 +28,6 @@ app = typer.Typer(
 )
 
 
-def _placeholder(group: str, action: str) -> None:
-    typer.echo(
-        f"[telegram-planfix-assistant] {group} {action}: not implemented yet "
-        "(scheduled in a later task).",
-        err=True,
-    )
-    raise typer.Exit(code=2)
-
-
 # --- auth -------------------------------------------------------------------
 
 
@@ -1432,10 +1423,225 @@ messages_app = typer.Typer(help="Send messages and service commands.", no_args_i
 app.add_typer(messages_app, name="messages")
 
 
+def _build_message_backends(config_path: Path | None):
+    """Open the Telethon-backed topic + folder backends + store for messaging.
+
+    The topic backend doubles as the message backend in production (the
+    Telethon adapter for topics already implements ``send_message``); we
+    reuse it here so HTTP and CLI never disagree on which client sends the
+    message.
+    """
+    config = _load_config_or_exit(config_path)
+    manager = TelethonSessionManager(config.telegram)
+    store = OperationStore(default_database_path(config))
+
+    async def _open():
+        from telegram_planfix_assistant.folders import TelethonFolderBackend
+        from telegram_planfix_assistant.topics.telethon_backend import (
+            TelethonTopicBackend,
+        )
+
+        client = await manager.get_client()
+        if not await client.is_user_authorized():
+            raise RuntimeError(
+                "Telethon session is not authorized; run "
+                "`telegram-planfix-assistant auth` first."
+            )
+        topic_backend = TelethonTopicBackend(client)
+        return topic_backend, TelethonFolderBackend(client)
+
+    return config, manager, store, _open
+
+
 @messages_app.command("send")
-def messages_send() -> None:
-    """Send a message or command (Task 13)."""
-    _placeholder("messages", "send")
+def messages_send(
+    text: str = typer.Option(..., "--text", help="Message text or service command."),
+    chat_id: int | None = typer.Option(
+        None,
+        "--chat-id",
+        help="Numeric Telegram chat id (targeted send).",
+    ),
+    chat_name: str | None = typer.Option(
+        None,
+        "--chat-name",
+        help="Chat title (resolved within --folder-name).",
+    ),
+    folder_name: str | None = typer.Option(
+        None,
+        "--folder-name",
+        help="Folder used for chat resolution or mass mode "
+        "(defaults to telegram.default_chat_folder.folder_name).",
+    ),
+    folder_id: int | None = typer.Option(
+        None,
+        "--folder-id",
+        help="Optional folder id cross-check.",
+    ),
+    topic_id: int | None = typer.Option(
+        None,
+        "--topic-id",
+        help="Numeric forum topic id (targeted send into a topic).",
+    ),
+    topic_name: str | None = typer.Option(
+        None,
+        "--topic-name",
+        help="Topic title; resolves to --topic-id in targeted mode, "
+        "or triggers mass send when no chat is given.",
+    ),
+    mass: bool = typer.Option(
+        False,
+        "--mass",
+        help="Force mass mode: send to every chat in --folder-name that has --topic-name.",
+    ),
+    operation_id: str | None = typer.Option(
+        None,
+        "--operation-id",
+        help="Idempotency anchor; reuse to replay the saved result instead of re-sending.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Send a message or service command (targeted or folder-wide mass mode)."""
+    from telegram_planfix_assistant.folders import (
+        FolderError,
+        resolve_chat_in_folder,
+    )
+    from telegram_planfix_assistant.messages import (
+        MassSendRequest,
+        MessageSendFailed,
+        MessageSendNeedsReview,
+        MessageSendPending,
+        SendMessageRequest,
+        mass_send_message,
+        send_message,
+    )
+    from telegram_planfix_assistant.topics import (
+        AmbiguousTopicNameError,
+        TopicNotFoundError,
+        resolve_topic_id_by_name,
+    )
+
+    is_mass = mass or (chat_id is None and chat_name is None)
+    if is_mass and topic_name is None:
+        typer.echo(
+            "mass mode requires --topic-name (and --folder-name resolves the folder)",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if not is_mass and (chat_id is not None) == (chat_name is not None):
+        typer.echo(
+            "targeted send requires exactly one of --chat-id or --chat-name",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    config, manager, store, open_backends = _build_message_backends(config_path)
+
+    # Mass mode and chat_name resolution both need the folder default.
+    if is_mass or chat_name is not None:
+        resolved_folder_name, default_fid, _ = _resolve_folder_name(
+            folder_name, config_path
+        )
+        effective_folder_id = folder_id if folder_id is not None else default_fid
+    else:
+        resolved_folder_name = folder_name
+        effective_folder_id = folder_id
+
+    async def _run() -> dict[str, object]:
+        try:
+            topic_backend, folder_backend = await open_backends()
+            message_backend = topic_backend
+
+            if is_mass:
+                req = MassSendRequest(
+                    folder_name=resolved_folder_name or "",
+                    topic_name=topic_name or "",
+                    text=text,
+                    folder_id=effective_folder_id,
+                    operation_id=operation_id,
+                )
+                result = await mass_send_message(
+                    message_backend=message_backend,
+                    topic_backend=topic_backend,
+                    folder_backend=folder_backend,
+                    store=store,
+                    request=req,
+                )
+                payload = result.to_dict()
+                payload["mode"] = "mass"
+                return payload
+
+            # Targeted send.
+            if chat_id is not None:
+                resolved_chat_id = chat_id
+                resolved_chat_name: str | None = None
+            else:
+                resolved = await resolve_chat_in_folder(
+                    folder_backend,
+                    folder_name=resolved_folder_name or "",
+                    chat_name=chat_name or "",
+                    folder_id=effective_folder_id,
+                )
+                resolved_chat_id = resolved.chat_id
+                resolved_chat_name = resolved.title
+
+            resolved_topic_id = topic_id
+            resolved_topic_name: str | None = None
+            if resolved_topic_id is None and topic_name is not None:
+                resolved_topic_id = await resolve_topic_id_by_name(
+                    backend=topic_backend,
+                    telegram_chat_id=resolved_chat_id,
+                    topic_name=topic_name,
+                )
+                resolved_topic_name = topic_name
+
+            req_single = SendMessageRequest(
+                telegram_chat_id=resolved_chat_id,
+                text=text,
+                telegram_topic_id=resolved_topic_id,
+                operation_id=operation_id,
+                chat_name=resolved_chat_name,
+                topic_name=resolved_topic_name,
+            )
+            result_single, op = await send_message(
+                backend=message_backend, store=store, request=req_single
+            )
+            payload = result_single.to_dict()
+            payload["operation_id"] = op.id
+            payload["operation_status"] = op.status.value
+            payload["mode"] = "targeted"
+            return payload
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        payload = asyncio.run(_run())
+    except (
+        MessageSendPending,
+        MessageSendNeedsReview,
+        MessageSendFailed,
+    ) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except (AmbiguousTopicNameError, TopicNotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except FolderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"messages send failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
 # --- folders ----------------------------------------------------------------
