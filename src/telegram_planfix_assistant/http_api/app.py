@@ -10,14 +10,18 @@ from fastapi import APIRouter, FastAPI, Request
 from telegram_planfix_assistant import __version__
 from telegram_planfix_assistant.config import AppConfig, load_config
 from telegram_planfix_assistant.folders import FolderBackend
-from telegram_planfix_assistant.health import collect_health
+from telegram_planfix_assistant.groups import GroupBackend
+from telegram_planfix_assistant.health import collect_health, default_database_path
 from telegram_planfix_assistant.http_api.auth import BearerAuth
 from telegram_planfix_assistant.http_api.folders import build_router as build_folders_router
+from telegram_planfix_assistant.http_api.groups import build_router as build_groups_router
+from telegram_planfix_assistant.persistence.store import OperationStore
 from telegram_planfix_assistant.telegram_client.session import (
     TelethonSessionManager,
 )
 
 FolderBackendFactory = Callable[[Request], FolderBackend | None]
+GroupBackendFactory = Callable[[Request], GroupBackend | None]
 
 
 def _build_health_router() -> APIRouter:
@@ -80,12 +84,39 @@ def _default_folder_backend_factory(
     return _factory
 
 
+def _default_group_backend_factory(
+    session_manager: TelethonSessionManager | None,
+) -> GroupBackendFactory:
+    """Build a Telethon-backed group backend factory.
+
+    Mirrors :func:`_default_folder_backend_factory`: returns ``None`` until a
+    Telethon client is available so the HTTP layer can return 503 rather than
+    silently 500.
+    """
+
+    def _factory(_request: Request) -> GroupBackend | None:
+        if session_manager is None:
+            return None
+        client = getattr(session_manager, "_client", None)
+        if client is None:
+            return None
+        from telegram_planfix_assistant.groups.telethon_backend import (
+            TelethonGroupBackend,
+        )
+
+        return TelethonGroupBackend(client)
+
+    return _factory
+
+
 def create_app(
     config: AppConfig | None = None,
     *,
     session_manager: TelethonSessionManager | None = None,
     database_path: Path | None = None,
     folder_backend_factory: FolderBackendFactory | None = None,
+    group_backend_factory: GroupBackendFactory | None = None,
+    operation_store: OperationStore | None = None,
 ) -> FastAPI:
     """Build a FastAPI instance.
 
@@ -94,9 +125,11 @@ def create_app(
     that inject an `AppConfig` directly. ``session_manager`` and
     ``database_path`` are optional so the service can come up — and respond
     to ``GET /health`` — before the Telethon session has been authorized.
-    ``folder_backend_factory`` lets tests inject a fake :class:`FolderBackend`
-    without spinning up Telethon; in production it defaults to one bound to
-    the supplied session manager.
+    ``folder_backend_factory`` / ``group_backend_factory`` let tests inject
+    fakes without spinning up Telethon. ``operation_store`` lets tests share a
+    store between requests; in production we open one rooted at
+    :func:`default_database_path` so HTTP requests can replay completed
+    operations from the same SQLite file the worker writes to.
     """
     if config is None:
         config = load_config()
@@ -113,9 +146,30 @@ def create_app(
         if folder_backend_factory is not None
         else _default_folder_backend_factory(session_manager)
     )
+    app.state.group_backend_factory = (
+        group_backend_factory
+        if group_backend_factory is not None
+        else _default_group_backend_factory(session_manager)
+    )
+    if operation_store is not None:
+        app.state.operation_store = operation_store
+    else:
+        db_path = (
+            database_path
+            if database_path is not None
+            else default_database_path(config)
+        )
+        try:
+            app.state.operation_store = OperationStore(db_path)
+        except Exception:
+            # If the store can't be opened (e.g. read-only mount during a
+            # smoke test) leave the slot empty — the groups router will return
+            # 503 on demand rather than failing at app startup.
+            app.state.operation_store = None
 
     app.include_router(_build_health_router())
     app.include_router(_build_protected_router(), prefix="/telegram")
     app.include_router(build_folders_router(), prefix="/telegram")
+    app.include_router(build_groups_router(), prefix="/telegram")
 
     return app

@@ -189,16 +189,16 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 7: Group create (HTTP + CLI)
 
-- [ ] implement `POST /telegram/groups` and `telegram-planfix-assistant groups create` sharing one domain function
-- [ ] create supergroup, enable topics (default from `telegram.defaults.enable_topics`), add `@planfix_bot` if listed in `members`/`reserve_members`
-- [ ] add primary admins, members, reserve admins, and reserve members; promote admins to Telegram admin role
-- [ ] create invite link when `create_invite_link` is true (default from `telegram.defaults.create_invite_link`)
-- [ ] place the new group into the configured chat folder
-- [ ] when `planfix_task_id` is provided and `@planfix_bot` is in the group, send `/task {planfix_task_id}` as a service message
-- [ ] enforce idempotency by `planfix_task_id`, falling back to exact `title` match
-- [ ] support CLI `--no-reserve` to skip configured reserve accounts; allow `--reserve-admin`/`--reserve-member` to add on top of config
-- [ ] write tests covering: happy path, idempotent re-call by `planfix_task_id`, idempotent re-call by `title`, `--no-reserve`, missing folder, `@planfix_bot` triggering `/task` message
-- [ ] run project tests - must pass before next task
+- [x] implement `POST /telegram/groups` and `telegram-planfix-assistant groups create` sharing one domain function
+- [x] create supergroup, enable topics (default from `telegram.defaults.enable_topics`), add `@planfix_bot` if listed in `members`/`reserve_members`
+- [x] add primary admins, members, reserve admins, and reserve members; promote admins to Telegram admin role
+- [x] create invite link when `create_invite_link` is true (default from `telegram.defaults.create_invite_link`)
+- [x] place the new group into the configured chat folder
+- [x] when `planfix_task_id` is provided and `@planfix_bot` is in the group, send `/task {planfix_task_id}` as a service message
+- [x] enforce idempotency by `planfix_task_id`, falling back to exact `title` match
+- [x] support CLI `--no-reserve` to skip configured reserve accounts; allow `--reserve-admin`/`--reserve-member` to add on top of config
+- [x] write tests covering: happy path, idempotent re-call by `planfix_task_id`, idempotent re-call by `title`, `--no-reserve`, missing folder, `@planfix_bot` triggering `/task` message
+- [x] run project tests - must pass before next task
 
 ### Task 8: Single topic create (HTTP + CLI)
 

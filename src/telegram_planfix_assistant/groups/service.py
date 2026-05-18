@@ -1,0 +1,426 @@
+"""Group-creation domain shared by HTTP, CLI, and worker.
+
+The :func:`create_group` function is the single source of truth for the
+"create a Telegram supergroup for a Planfix client" workflow. It orchestrates
+the supergroup creation, member/admin/reserve population, invite-link creation,
+folder placement, and optional ``/task <id>`` service message.
+
+Idempotency is anchored at the persistence layer: the operation key is derived
+from ``planfix_task_id`` if present, otherwise the exact ``title``. A replay of
+a completed call returns the saved result without touching Telegram.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+from telegram_planfix_assistant.config.models import TelegramConfig
+from telegram_planfix_assistant.folders.service import (
+    FolderBackend,
+    FolderError,
+    FolderPeerFailureError,
+    resolve_folder,
+)
+from telegram_planfix_assistant.persistence import idempotency
+from telegram_planfix_assistant.persistence.models import (
+    OperationRecord,
+    OperationStatus,
+)
+from telegram_planfix_assistant.persistence.store import OperationStore
+
+PLANFIX_BOT_USERNAME = "@planfix_bot"
+
+
+class GroupError(RuntimeError):
+    """Base class for group-creation failures surfaced to callers."""
+
+
+class GroupCreateFailed(GroupError):
+    """A previous attempt with this idempotency key already failed."""
+
+
+class GroupCreatePending(GroupError):
+    """A concurrent attempt with this idempotency key is still in flight."""
+
+
+class GroupCreateNeedsReview(GroupError):
+    """A previous attempt resulted in ``needs_review`` and must not auto-retry."""
+
+
+@dataclass(frozen=True)
+class GroupCreateRequest:
+    """Input shape shared by HTTP, CLI, and tests."""
+
+    title: str
+    planfix_task_id: int | str | None = None
+    about: str | None = None
+    admins: Sequence[str] = ()
+    members: Sequence[str] = ()
+    reserve_admins: Sequence[str] | None = None
+    reserve_members: Sequence[str] | None = None
+    skip_reserve: bool = False
+    enable_topics: bool | None = None
+    create_invite_link: bool | None = None
+    folder_name: str | None = None
+    folder_id: int | None = None
+    skip_folder: bool = False
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "planfix_task_id": self.planfix_task_id,
+            "about": self.about,
+            "admins": list(self.admins),
+            "members": list(self.members),
+            "reserve_admins": (
+                list(self.reserve_admins) if self.reserve_admins is not None else None
+            ),
+            "reserve_members": (
+                list(self.reserve_members) if self.reserve_members is not None else None
+            ),
+            "skip_reserve": self.skip_reserve,
+            "enable_topics": self.enable_topics,
+            "create_invite_link": self.create_invite_link,
+            "folder_name": self.folder_name,
+            "folder_id": self.folder_id,
+            "skip_folder": self.skip_folder,
+        }
+
+
+@dataclass(frozen=True)
+class GroupCreateResult:
+    """Result returned by both the live execution and a replay."""
+
+    telegram_chat_id: int
+    title: str
+    planfix_task_id: int | str | None
+    invite_link: str | None
+    folder_id: int | None
+    folder_name: str | None
+    topics_enabled: bool
+    admins_added: list[str] = field(default_factory=list)
+    members_added: list[str] = field(default_factory=list)
+    admins_promoted: list[str] = field(default_factory=list)
+    skipped: list[dict[str, Any]] = field(default_factory=list)
+    task_message_sent: bool = False
+    replayed: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "telegram_chat_id": self.telegram_chat_id,
+            "title": self.title,
+            "planfix_task_id": self.planfix_task_id,
+            "invite_link": self.invite_link,
+            "folder_id": self.folder_id,
+            "folder_name": self.folder_name,
+            "topics_enabled": self.topics_enabled,
+            "admins_added": list(self.admins_added),
+            "members_added": list(self.members_added),
+            "admins_promoted": list(self.admins_promoted),
+            "skipped": list(self.skipped),
+            "task_message_sent": self.task_message_sent,
+            "replayed": self.replayed,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> GroupCreateResult:
+        return cls(
+            telegram_chat_id=int(payload["telegram_chat_id"]),
+            title=str(payload["title"]),
+            planfix_task_id=payload.get("planfix_task_id"),
+            invite_link=payload.get("invite_link"),
+            folder_id=payload.get("folder_id"),
+            folder_name=payload.get("folder_name"),
+            topics_enabled=bool(payload.get("topics_enabled", False)),
+            admins_added=list(payload.get("admins_added") or []),
+            members_added=list(payload.get("members_added") or []),
+            admins_promoted=list(payload.get("admins_promoted") or []),
+            skipped=list(payload.get("skipped") or []),
+            task_message_sent=bool(payload.get("task_message_sent", False)),
+            replayed=True,
+        )
+
+
+class GroupBackend(Protocol):
+    """Telethon-facing operations needed to build a client supergroup.
+
+    Tests inject a fake; production wires this to a Telethon-specific adapter.
+    Each method is a thin verb so the domain function stays pure orchestration.
+    """
+
+    async def create_supergroup(
+        self,
+        *,
+        title: str,
+        about: str | None,
+        enable_topics: bool,
+    ) -> int:
+        ...
+
+    async def add_member(self, *, chat_id: int, user: str) -> None:
+        ...
+
+    async def promote_admin(self, *, chat_id: int, user: str) -> None:
+        ...
+
+    async def create_invite_link(self, *, chat_id: int) -> str:
+        ...
+
+    async def send_message(self, *, chat_id: int, text: str) -> int:
+        ...
+
+
+def _resolved_reserves(
+    explicit: Sequence[str] | None,
+    *,
+    fallback: Sequence[str],
+    skip: bool,
+) -> list[str]:
+    """Combine explicit overrides with configured defaults.
+
+    ``explicit=None`` means "use the configured defaults" so a caller that does
+    not pass anything still gets reserves; an empty list ``[]`` means "do not
+    add any from this category". ``skip=True`` zeroes both.
+    """
+    if skip:
+        return []
+    if explicit is None:
+        return list(fallback)
+    return list(explicit)
+
+
+def _dedupe(items: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+async def _execute_create(
+    *,
+    backend: GroupBackend,
+    folder_backend: FolderBackend | None,
+    request: GroupCreateRequest,
+    config: TelegramConfig,
+) -> GroupCreateResult:
+    enable_topics = (
+        request.enable_topics
+        if request.enable_topics is not None
+        else config.defaults.enable_topics
+    )
+    create_link = (
+        request.create_invite_link
+        if request.create_invite_link is not None
+        else config.defaults.create_invite_link
+    )
+
+    chat_id = await backend.create_supergroup(
+        title=request.title,
+        about=request.about,
+        enable_topics=enable_topics,
+    )
+
+    reserve_admins = _resolved_reserves(
+        request.reserve_admins,
+        fallback=config.reserve_admins,
+        skip=request.skip_reserve,
+    )
+    reserve_members = _resolved_reserves(
+        request.reserve_members,
+        fallback=config.reserve_members,
+        skip=request.skip_reserve,
+    )
+
+    # Build the ordered population plan, deduping users that appear in multiple
+    # buckets so we never invite the same handle twice.
+    all_members = _dedupe(
+        [*request.members, *reserve_members, *request.admins, *reserve_admins]
+    )
+    members_added: list[str] = []
+    skipped: list[dict[str, Any]] = []
+    for user in all_members:
+        try:
+            await backend.add_member(chat_id=chat_id, user=user)
+        except Exception as exc:
+            skipped.append(
+                {"step": "add_member", "user": user, "reason": str(exc)}
+            )
+            continue
+        members_added.append(user)
+
+    admins_promoted: list[str] = []
+    for admin in _dedupe([*request.admins, *reserve_admins]):
+        if admin not in members_added:
+            # We never managed to add this user, so promoting them would
+            # certainly fail. Record the skip and move on.
+            skipped.append(
+                {"step": "promote_admin", "user": admin, "reason": "not_in_chat"}
+            )
+            continue
+        try:
+            await backend.promote_admin(chat_id=chat_id, user=admin)
+        except Exception as exc:
+            skipped.append(
+                {"step": "promote_admin", "user": admin, "reason": str(exc)}
+            )
+            continue
+        admins_promoted.append(admin)
+
+    invite_link: str | None = None
+    if create_link:
+        try:
+            invite_link = await backend.create_invite_link(chat_id=chat_id)
+        except Exception as exc:
+            skipped.append(
+                {"step": "create_invite_link", "reason": str(exc)}
+            )
+
+    folder_id: int | None = None
+    folder_name: str | None = None
+    if not request.skip_folder:
+        target_folder_name = (
+            request.folder_name or config.default_chat_folder.folder_name
+        )
+        target_folder_id = (
+            request.folder_id
+            if request.folder_id is not None
+            else config.default_chat_folder.folder_id
+        )
+        # The supergroup was already created above, so any folder-related
+        # failure (missing folder, mid-mutation error, missing backend)
+        # leaves a half-applied change on Telegram's side — surface it as
+        # needs_review so the operator can finish placing the chat by hand.
+        if folder_backend is None:
+            raise FolderPeerFailureError(
+                f"folder backend is unavailable; group {chat_id} was created but "
+                f"could not be placed into folder {target_folder_name!r}"
+            )
+        try:
+            snapshot = await resolve_folder(
+                folder_backend,
+                folder_name=target_folder_name,
+                folder_id=target_folder_id,
+            )
+            await folder_backend.add_chat_to_folder(snapshot.folder_id, chat_id)
+        except FolderPeerFailureError:
+            raise
+        except FolderError as exc:
+            raise FolderPeerFailureError(
+                f"group {chat_id} was created but folder placement failed: {exc}"
+            ) from exc
+        except Exception as exc:
+            raise FolderPeerFailureError(
+                f"failed to add chat {chat_id} to folder {target_folder_name!r}: "
+                f"{exc}"
+            ) from exc
+        folder_id = snapshot.folder_id
+        folder_name = snapshot.folder_name
+
+    task_message_sent = False
+    if request.planfix_task_id is not None:
+        bot_in_group = any(
+            u.lstrip("@").lower() == PLANFIX_BOT_USERNAME.lstrip("@").lower()
+            for u in members_added
+        )
+        if bot_in_group:
+            try:
+                await backend.send_message(
+                    chat_id=chat_id, text=f"/task {request.planfix_task_id}"
+                )
+                task_message_sent = True
+            except Exception as exc:
+                skipped.append(
+                    {"step": "task_message", "reason": str(exc)}
+                )
+
+    return GroupCreateResult(
+        telegram_chat_id=chat_id,
+        title=request.title,
+        planfix_task_id=request.planfix_task_id,
+        invite_link=invite_link,
+        folder_id=folder_id,
+        folder_name=folder_name,
+        topics_enabled=enable_topics,
+        admins_added=list(request.admins),
+        members_added=members_added,
+        admins_promoted=admins_promoted,
+        skipped=skipped,
+        task_message_sent=task_message_sent,
+    )
+
+
+async def create_group(
+    *,
+    backend: GroupBackend,
+    folder_backend: FolderBackend | None,
+    store: OperationStore,
+    config: TelegramConfig,
+    request: GroupCreateRequest,
+) -> tuple[GroupCreateResult, OperationRecord]:
+    """Create a group, or replay the saved result for the same idempotency key.
+
+    The state machine lives in :class:`OperationStore`; this function only
+    drives the transitions:
+
+    * `completed` → return the saved result with ``replayed=True``
+    * `failed` → raise :class:`GroupCreateFailed`
+    * `needs_review` → raise :class:`GroupCreateNeedsReview`
+    * `pending` (from a parallel call) → raise :class:`GroupCreatePending`
+    * new row → run the live workflow, transition to `completed`/`failed`/
+      `needs_review` depending on the outcome
+    """
+    if not request.title.strip() and request.planfix_task_id is None:
+        raise ValueError("group create requires planfix_task_id or non-empty title")
+
+    key = idempotency.group_create_key(
+        planfix_task_id=request.planfix_task_id, title=request.title
+    )
+    begin = store.begin_operation(
+        operation_type=idempotency.GROUP_CREATE,
+        idempotency_key=key,
+        request_payload=request.to_payload(),
+    )
+
+    if not begin.created:
+        op = begin.operation
+        if op.status is OperationStatus.COMPLETED:
+            payload = op.result_payload or {}
+            return GroupCreateResult.from_dict(payload), op
+        if op.status is OperationStatus.FAILED:
+            raise GroupCreateFailed(op.error or "previous attempt failed")
+        if op.status is OperationStatus.NEEDS_REVIEW:
+            raise GroupCreateNeedsReview(
+                op.error or "previous attempt needs review"
+            )
+        # pending: another request is already in flight (or a previous run
+        # crashed before transitioning). We don't auto-retry from this surface;
+        # callers can `operations retry`.
+        raise GroupCreatePending(
+            f"operation {op.id} is still pending; retry via 'operations retry'"
+        )
+
+    operation_id = begin.operation.id
+    try:
+        result = await _execute_create(
+            backend=backend,
+            folder_backend=folder_backend,
+            request=request,
+            config=config,
+        )
+    except FolderPeerFailureError as exc:
+        op = store.mark_needs_review(operation_id, str(exc))
+        raise GroupCreateNeedsReview(str(exc)) from exc
+    except GroupError:
+        raise
+    except Exception as exc:
+        store.fail_operation(operation_id, str(exc))
+        raise
+
+    op = store.complete_operation(operation_id, result.to_dict())
+    return result, op
