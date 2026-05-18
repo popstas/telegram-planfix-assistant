@@ -113,6 +113,8 @@ class WorkerQueue:
         operation_id: str,
         items: Sequence[BulkItemSpec],
         item_handler: ItemHandler,
+        *,
+        stop_on_failure: bool = False,
     ) -> list[OperationItemRecord]:
         """Register and run each item, persisting progress for restart-safety.
 
@@ -121,6 +123,11 @@ class WorkerQueue:
         same applies on restart: calling `run_bulk` again with the same items
         will pick up exactly where the previous run left off because
         `begin_item` is idempotent on `(operation_id, idempotency_key)`.
+
+        When ``stop_on_failure`` is true, the loop breaks the first time an
+        item ends in a non-completed terminal state (``failed`` or
+        ``needs_review``). Items not yet started are left untouched so a later
+        resume can finish them.
         """
         results: list[OperationItemRecord] = []
         for spec in items:
@@ -131,9 +138,13 @@ class WorkerQueue:
             )
             if item.status is not OperationStatus.PENDING:
                 results.append(item)
+                if stop_on_failure and item.status is not OperationStatus.COMPLETED:
+                    break
                 continue
             final = await self._run_item(item.id, spec, item_handler)
             results.append(final)
+            if stop_on_failure and final.status is not OperationStatus.COMPLETED:
+                break
         return results
 
     async def _run_item(

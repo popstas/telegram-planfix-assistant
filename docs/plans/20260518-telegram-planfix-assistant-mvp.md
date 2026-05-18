@@ -213,15 +213,15 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 9: Bulk topic create (HTTP + CLI)
 
-- [ ] implement `POST /telegram/topics/bulk-create` and `telegram-planfix-assistant topics bulk-create`
-- [ ] accept JSON body and `--file <path>` CSV with columns `planfix_task_id,topic_name,message`
-- [ ] run via the worker queue with FLOOD_WAIT awareness and per-item progress
-- [ ] enforce per-item idempotency (by `planfix_task_id` when present, otherwise `telegram_chat_id + topic_name`)
-- [ ] reuse single-topic first-message logic per item
-- [ ] respect `continue_on_error` (default true): continue the batch after a single-item failure
-- [ ] return aggregated response with `created`, `existed`, `failed`, and per-item results
-- [ ] write tests covering CSV parsing, JSON path, per-item idempotency, `continue_on_error` behavior, restart-resume of a partially completed batch
-- [ ] run project tests - must pass before next task
+- [x] implement `POST /telegram/topics/bulk-create` and `telegram-planfix-assistant topics bulk-create`
+- [x] accept JSON body and `--file <path>` CSV with columns `planfix_task_id,topic_name,message`
+- [x] run via the worker queue with FLOOD_WAIT awareness and per-item progress
+- [x] enforce per-item idempotency (by `planfix_task_id` when present, otherwise `telegram_chat_id + topic_name`)
+- [x] reuse single-topic first-message logic per item
+- [x] respect `continue_on_error` (default true): continue the batch after a single-item failure
+- [x] return aggregated response with `created`, `existed`, `failed`, and per-item results
+- [x] write tests covering CSV parsing, JSON path, per-item idempotency, `continue_on_error` behavior, restart-resume of a partially completed batch
+- [x] run project tests - must pass before next task
 
 ### Task 10: Close topic (HTTP + CLI)
 

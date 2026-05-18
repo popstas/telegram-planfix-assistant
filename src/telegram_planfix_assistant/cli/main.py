@@ -487,10 +487,224 @@ def topics_create(
     typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
+def _parse_bulk_topics_csv(path: Path) -> list[dict[str, object]]:
+    """Read a `planfix_task_id,topic_name,message` CSV into bulk items.
+
+    ``planfix_task_id`` and ``message`` may be empty per row; ``topic_name``
+    is required. Lines starting with ``#`` and blank rows are ignored so
+    operators can keep notes alongside the data.
+    """
+    import csv
+
+    out: list[dict[str, object]] = []
+    with path.open(newline="", encoding="utf-8") as fp:
+        reader = csv.DictReader(fp)
+        required = {"topic_name"}
+        if reader.fieldnames is None or not required.issubset(set(reader.fieldnames)):
+            raise typer.BadParameter(
+                f"CSV must have at least column 'topic_name'; got {reader.fieldnames!r}"
+            )
+        for row in reader:
+            name = (row.get("topic_name") or "").strip()
+            if not name:
+                continue
+            task = (row.get("planfix_task_id") or "").strip() or None
+            message = row.get("message")
+            if message is not None:
+                message = message.strip() or None
+            out.append(
+                {
+                    "topic_name": name,
+                    "planfix_task_id": task,
+                    "message": message,
+                }
+            )
+    if not out:
+        raise typer.BadParameter("CSV produced zero items")
+    return out
+
+
+def _parse_bulk_topics_json(path: Path) -> list[dict[str, object]]:
+    """Read a JSON list of `{topic_name, planfix_task_id?, message?}`."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise typer.BadParameter("JSON file must contain a top-level list")
+    out: list[dict[str, object]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise typer.BadParameter("each JSON entry must be an object")
+        name = str(entry.get("topic_name") or "").strip()
+        if not name:
+            raise typer.BadParameter("each entry needs a non-empty topic_name")
+        out.append(
+            {
+                "topic_name": name,
+                "planfix_task_id": entry.get("planfix_task_id"),
+                "message": entry.get("message"),
+            }
+        )
+    if not out:
+        raise typer.BadParameter("JSON file produced zero items")
+    return out
+
+
 @topics_app.command("bulk-create")
-def topics_bulk_create() -> None:
-    """Bulk-create topics (Task 9)."""
-    _placeholder("topics", "bulk-create")
+def topics_bulk_create(
+    chat_id: int | None = typer.Option(
+        None,
+        "--chat-id",
+        help="Numeric Telegram chat id of the supergroup.",
+    ),
+    chat_name: str | None = typer.Option(
+        None,
+        "--chat-name",
+        help="Chat title (resolved within --folder-name).",
+    ),
+    folder_name: str | None = typer.Option(
+        None,
+        "--folder-name",
+        help="Folder used for --chat-name lookup "
+        "(defaults to telegram.default_chat_folder.folder_name).",
+    ),
+    folder_id: int | None = typer.Option(
+        None,
+        "--folder-id",
+        help="Optional folder id cross-check.",
+    ),
+    file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--file",
+        help="CSV (planfix_task_id,topic_name,message) or JSON list of items.",
+        exists=False,
+    ),
+    operation_id: str | None = typer.Option(
+        None,
+        "--operation-id",
+        help="Idempotency id for the bulk; rerunning with the same value resumes the batch.",
+    ),
+    continue_on_error: bool = typer.Option(
+        True,
+        "--continue-on-error/--stop-on-error",
+        help="Continue the batch after a single-item failure (default true).",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Bulk-create topics from a CSV or JSON file."""
+    from telegram_planfix_assistant.folders import (
+        FolderError,
+        resolve_chat_in_folder,
+    )
+    from telegram_planfix_assistant.topics import (
+        BulkTopicCreateFailed,
+        BulkTopicCreateNeedsReview,
+        BulkTopicCreatePending,
+        BulkTopicCreateRequest,
+        BulkTopicItem,
+        bulk_create_topics,
+    )
+    from telegram_planfix_assistant.worker.queue import WorkerQueue
+
+    if (chat_id is None) == (chat_name is None):
+        typer.echo(
+            "exactly one of --chat-id or --chat-name must be supplied", err=True
+        )
+        raise typer.Exit(code=2)
+    if file is None:
+        typer.echo("--file is required (CSV or JSON)", err=True)
+        raise typer.Exit(code=2)
+    if not file.exists():
+        typer.echo(f"--file path does not exist: {file}", err=True)
+        raise typer.Exit(code=2)
+
+    raw_items = (
+        _parse_bulk_topics_json(file)
+        if file.suffix.lower() == ".json"
+        else _parse_bulk_topics_csv(file)
+    )
+
+    config, manager, store, open_backends = _build_topic_backends(config_path)
+
+    if chat_name is not None:
+        resolved_folder_name, default_fid, _ = _resolve_folder_name(
+            folder_name, config_path
+        )
+        effective_folder_id = folder_id if folder_id is not None else default_fid
+    else:
+        resolved_folder_name = folder_name
+        effective_folder_id = folder_id
+
+    queue = WorkerQueue(
+        store,
+        max_parallel=config.queue.max_parallel_telegram_ops,
+        flood_wait_safety_margin_seconds=config.queue.flood_wait_safety_margin_seconds,
+        default_retry_delay_seconds=config.queue.default_retry_delay_seconds,
+    )
+
+    async def _run() -> dict[str, object]:
+        try:
+            topic_backend, folder_backend = await open_backends()
+            if chat_id is not None:
+                resolved_chat_id = chat_id
+            else:
+                resolved = await resolve_chat_in_folder(
+                    folder_backend,
+                    folder_name=resolved_folder_name or "",
+                    chat_name=chat_name or "",
+                    folder_id=effective_folder_id,
+                )
+                resolved_chat_id = resolved.chat_id
+
+            req = BulkTopicCreateRequest(
+                telegram_chat_id=resolved_chat_id,
+                items=tuple(
+                    BulkTopicItem(
+                        topic_name=str(it["topic_name"]),
+                        planfix_task_id=it.get("planfix_task_id"),
+                        message=it.get("message"),
+                    )
+                    for it in raw_items
+                ),
+                continue_on_error=continue_on_error,
+                operation_id=operation_id,
+            )
+            result, op = await bulk_create_topics(
+                backend=topic_backend,
+                store=store,
+                queue=queue,
+                request=req,
+            )
+            payload = result.to_dict()
+            payload["operation_status"] = op.status.value
+            return payload
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        payload = asyncio.run(_run())
+    except (
+        BulkTopicCreatePending,
+        BulkTopicCreateNeedsReview,
+        BulkTopicCreateFailed,
+    ) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except FolderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"topics bulk-create failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
 @topics_app.command("close")
