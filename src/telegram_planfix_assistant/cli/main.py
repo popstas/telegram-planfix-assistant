@@ -340,10 +340,151 @@ topics_app = typer.Typer(help="Manage forum topics.", no_args_is_help=True)
 app.add_typer(topics_app, name="topics")
 
 
+def _build_topic_backends(config_path: Path | None):
+    """Open the Telethon-backed topic + folder backends + store for the CLI.
+
+    Mirrors :func:`_build_group_backends`: lazy Telethon imports keep
+    ``topics create --help`` cheap.
+    """
+    config = _load_config_or_exit(config_path)
+    manager = TelethonSessionManager(config.telegram)
+    store = OperationStore(default_database_path(config))
+
+    async def _open():
+        from telegram_planfix_assistant.folders import TelethonFolderBackend
+        from telegram_planfix_assistant.topics.telethon_backend import (
+            TelethonTopicBackend,
+        )
+
+        client = await manager.get_client()
+        if not await client.is_user_authorized():
+            raise RuntimeError(
+                "Telethon session is not authorized; run "
+                "`telegram-planfix-assistant auth` first."
+            )
+        return TelethonTopicBackend(client), TelethonFolderBackend(client)
+
+    return config, manager, store, _open
+
+
 @topics_app.command("create")
-def topics_create() -> None:
-    """Create a single topic (Task 8)."""
-    _placeholder("topics", "create")
+def topics_create(
+    topic_name: str = typer.Option(..., "--topic-name", help="Topic title."),
+    chat_id: int | None = typer.Option(
+        None,
+        "--chat-id",
+        help="Numeric Telegram chat id of the supergroup.",
+    ),
+    chat_name: str | None = typer.Option(
+        None,
+        "--chat-name",
+        help="Chat title (resolved within --folder-name).",
+    ),
+    folder_name: str | None = typer.Option(
+        None,
+        "--folder-name",
+        help="Folder used for --chat-name lookup "
+        "(defaults to telegram.default_chat_folder.folder_name).",
+    ),
+    folder_id: int | None = typer.Option(
+        None,
+        "--folder-id",
+        help="Optional folder id cross-check.",
+    ),
+    planfix_task_id: str | None = typer.Option(
+        None,
+        "--planfix-task-id",
+        help="Planfix task id; primary idempotency key and `/task <id>` trigger.",
+    ),
+    message: str | None = typer.Option(
+        None,
+        "--message",
+        help="Optional first message text (overrides topic-name duplication).",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Create a single forum topic in an existing supergroup."""
+    from telegram_planfix_assistant.folders import (
+        FolderError,
+        resolve_chat_in_folder,
+    )
+    from telegram_planfix_assistant.topics import (
+        TopicCreateFailed,
+        TopicCreateNeedsReview,
+        TopicCreatePending,
+        TopicCreateRequest,
+        create_topic,
+    )
+
+    if (chat_id is None) == (chat_name is None):
+        typer.echo(
+            "exactly one of --chat-id or --chat-name must be supplied", err=True
+        )
+        raise typer.Exit(code=2)
+
+    config, manager, store, open_backends = _build_topic_backends(config_path)
+
+    if chat_name is not None:
+        resolved_folder_name, default_fid, _ = _resolve_folder_name(
+            folder_name, config_path
+        )
+        effective_folder_id = folder_id if folder_id is not None else default_fid
+    else:
+        resolved_folder_name = folder_name
+        effective_folder_id = folder_id
+
+    async def _run() -> dict[str, object]:
+        try:
+            topic_backend, folder_backend = await open_backends()
+            if chat_id is not None:
+                resolved_chat_id = chat_id
+            else:
+                resolved = await resolve_chat_in_folder(
+                    folder_backend,
+                    folder_name=resolved_folder_name or "",
+                    chat_name=chat_name or "",
+                    folder_id=effective_folder_id,
+                )
+                resolved_chat_id = resolved.chat_id
+
+            request = TopicCreateRequest(
+                telegram_chat_id=resolved_chat_id,
+                topic_name=topic_name,
+                planfix_task_id=planfix_task_id,
+                message=message,
+            )
+            result, op = await create_topic(
+                backend=topic_backend, store=store, request=request
+            )
+            payload = result.to_dict()
+            payload["operation_id"] = op.id
+            payload["operation_status"] = op.status.value
+            return payload
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        payload = asyncio.run(_run())
+    except (TopicCreatePending, TopicCreateNeedsReview, TopicCreateFailed) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except FolderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"topics create failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
 @topics_app.command("bulk-create")
