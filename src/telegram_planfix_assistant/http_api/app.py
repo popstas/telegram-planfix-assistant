@@ -16,8 +16,10 @@ from telegram_planfix_assistant.http_api.auth import BearerAuth
 from telegram_planfix_assistant.http_api.folders import build_router as build_folders_router
 from telegram_planfix_assistant.http_api.groups import build_router as build_groups_router
 from telegram_planfix_assistant.http_api.members import build_router as build_members_router
+from telegram_planfix_assistant.http_api.messages import build_router as build_messages_router
 from telegram_planfix_assistant.http_api.topics import build_router as build_topics_router
 from telegram_planfix_assistant.members import MemberAddBackend, MemberRemoveBackend
+from telegram_planfix_assistant.messages import MessageBackend
 from telegram_planfix_assistant.persistence.store import OperationStore
 from telegram_planfix_assistant.telegram_client.session import (
     TelethonSessionManager,
@@ -29,6 +31,7 @@ GroupBackendFactory = Callable[[Request], GroupBackend | None]
 TopicBackendFactory = Callable[[Request], TopicBackend | None]
 MemberBackendFactory = Callable[[Request], MemberAddBackend | None]
 MemberRemoveBackendFactory = Callable[[Request], MemberRemoveBackend | None]
+MessageBackendFactory = Callable[[Request], MessageBackend | None]
 
 
 def _build_health_router() -> APIRouter:
@@ -176,6 +179,7 @@ def create_app(
     topic_backend_factory: TopicBackendFactory | None = None,
     member_backend_factory: MemberBackendFactory | None = None,
     member_remove_backend_factory: MemberRemoveBackendFactory | None = None,
+    message_backend_factory: MessageBackendFactory | None = None,
     operation_store: OperationStore | None = None,
 ) -> FastAPI:
     """Build a FastAPI instance.
@@ -222,6 +226,10 @@ def create_app(
         else _default_member_backend_factory(session_manager)
     )
     app.state.member_remove_backend_factory = member_remove_backend_factory
+    # When no dedicated message backend is supplied, the messages router falls
+    # back to the topic backend factory at request time (the production
+    # Telethon adapter for topics already implements `send_message`).
+    app.state.message_backend_factory = message_backend_factory
     if operation_store is not None:
         app.state.operation_store = operation_store
     else:
@@ -244,5 +252,6 @@ def create_app(
     app.include_router(build_groups_router(), prefix="/telegram")
     app.include_router(build_topics_router(), prefix="/telegram")
     app.include_router(build_members_router(), prefix="/telegram")
+    app.include_router(build_messages_router(), prefix="/telegram")
 
     return app
