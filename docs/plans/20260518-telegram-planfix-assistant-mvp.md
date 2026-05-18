@@ -130,15 +130,15 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 1: Project scaffolding
 
-- [ ] create Python 3.12+ project layout under `src/telegram_planfix_assistant/`
-- [ ] create `.venv` and pin dependencies (Telethon, FastAPI or equivalent, uvicorn, pydantic, SQLAlchemy or sqlite-utils, click/typer for CLI, structlog)
-- [ ] add `pyproject.toml` (or equivalent) with `telegram-planfix-assistant` CLI entrypoint
-- [ ] add `.gitignore` excluding `data/`, `.venv/`, `__pycache__/`, build artifacts
-- [ ] add config loader for `data/config.yml` with validation and clear error messages
-- [ ] add FastAPI app skeleton with bearer-token auth middleware reading `http.bearer_token` from config
-- [ ] add CLI skeleton with subcommand groups: `auth`, `health`, `groups`, `topics`, `members`, `messages`, `folders`, `operations`
-- [ ] write tests for config loader (valid file, missing keys, missing file)
-- [ ] run project tests - must pass before next task
+- [x] create Python 3.12+ project layout under `src/telegram_planfix_assistant/`
+- [x] create `.venv` and pin dependencies (Telethon, FastAPI or equivalent, uvicorn, pydantic, SQLAlchemy or sqlite-utils, click/typer for CLI, structlog)
+- [x] add `pyproject.toml` (or equivalent) with `telegram-planfix-assistant` CLI entrypoint
+- [x] add `.gitignore` excluding `data/`, `.venv/`, `__pycache__/`, build artifacts
+- [x] add config loader for `data/config.yml` with validation and clear error messages
+- [x] add FastAPI app skeleton with bearer-token auth middleware reading `http.bearer_token` from config
+- [x] add CLI skeleton with subcommand groups: `auth`, `health`, `groups`, `topics`, `members`, `messages`, `folders`, `operations`
+- [x] write tests for config loader (valid file, missing keys, missing file)
+- [x] run project tests - must pass before next task
 
 ### Task 2: Telethon session and `auth` CLI
 
