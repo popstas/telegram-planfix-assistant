@@ -288,29 +288,29 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 16: Verify acceptance criteria
 
-- [ ] verify project is named `telegram-planfix-assistant` and runs from Docker, `GET /health` passes
-- [ ] verify `telegram-planfix-assistant auth` performs interactive Telethon login and stores session under `data/`
-- [ ] verify `telegram-planfix-assistant health` reports the same status as `GET /health`
-- [ ] verify config is read from `data/config.yml`, and `data/` is in `.gitignore`
-- [ ] verify HTTP default port is `8085`
-- [ ] verify group creation works via HTTP and CLI
-- [ ] verify new group is placed into the configured chat folder
-- [ ] verify chat folder is not auto-created when missing
-- [ ] verify duplicate `planfix_task_id` does not create a duplicate group
-- [ ] verify duplicate `title` does not create a duplicate group
-- [ ] verify `/task {planfix_task_id}` is sent when `planfix_task_id` is present and `@planfix_bot` is in the group
-- [ ] verify single-topic creation works via HTTP and CLI
-- [ ] verify `--chat-name` lookup within `--folder-name` works
-- [ ] verify `--topic-name` lookup works
-- [ ] verify bulk topic creation works via HTTP and CLI, and `topics.csv` supports `planfix_task_id,topic_name,message`
-- [ ] verify bulk add/remove members works via HTTP and CLI, including `--dry-run` on remove
-- [ ] verify topic close works via HTTP and CLI
-- [ ] verify message/command send works via HTTP and CLI, including `folder_name + topic_name` mass mode
-- [ ] verify every bulk operation returns per-item results
-- [ ] verify `FLOOD_WAIT` is handled by the queue without losing the operation
-- [ ] verify Telegram errors are visible in responses, logs, and operation status
-- [ ] run full project test suite
-- [ ] run project linter - all issues must be fixed
+- [x] verify project is named `telegram-planfix-assistant` and runs from Docker, `GET /health` passes (pyproject.toml name + Dockerfile + tests/test_docker_image.py + tests/test_health.py)
+- [x] verify `telegram-planfix-assistant auth` performs interactive Telethon login and stores session under `data/` (cli/main.py auth command + tests/test_telegram_client.py)
+- [x] verify `telegram-planfix-assistant health` reports the same status as `GET /health` (cli/main.py health command + tests/test_health.py shared service)
+- [x] verify config is read from `data/config.yml`, and `data/` is in `.gitignore` (.gitignore line 2 `data/`, config/loader.py default path, tests/test_config_loader.py)
+- [x] verify HTTP default port is `8085` (config/models.py default + Dockerfile EXPOSE + docker-compose port mapping)
+- [x] verify group creation works via HTTP and CLI (groups module + tests/test_groups.py)
+- [x] verify new group is placed into the configured chat folder (tests/test_groups.py folder placement assertions)
+- [x] verify chat folder is not auto-created when missing (tests/test_folders.py missing-folder case)
+- [x] verify duplicate `planfix_task_id` does not create a duplicate group (tests/test_groups.py idempotency by task id)
+- [x] verify duplicate `title` does not create a duplicate group (tests/test_groups.py idempotency by title)
+- [x] verify `/task {planfix_task_id}` is sent when `planfix_task_id` is present and `@planfix_bot` is in the group (tests/test_groups.py planfix_bot /task message case)
+- [x] verify single-topic creation works via HTTP and CLI (topics module + tests/test_topics.py)
+- [x] verify `--chat-name` lookup within `--folder-name` works (tests/test_topics.py + tests/test_folders.py chat-name resolution)
+- [x] verify `--topic-name` lookup works (tests/test_topics_close.py + tests/test_messages.py topic-name resolution)
+- [x] verify bulk topic creation works via HTTP and CLI, and `topics.csv` supports `planfix_task_id,topic_name,message` (tests/test_topics_bulk.py CSV parsing)
+- [x] verify bulk add/remove members works via HTTP and CLI, including `--dry-run` on remove (tests/test_members.py + tests/test_members_remove.py)
+- [x] verify topic close works via HTTP and CLI (tests/test_topics_close.py)
+- [x] verify message/command send works via HTTP and CLI, including `folder_name + topic_name` mass mode (tests/test_messages.py mass mode cases)
+- [x] verify every bulk operation returns per-item results (tests/test_topics_bulk.py, tests/test_members.py, tests/test_members_remove.py, tests/test_messages.py per-item assertions)
+- [x] verify `FLOOD_WAIT` is handled by the queue without losing the operation (tests/test_worker_queue.py FLOOD_WAIT retry)
+- [x] verify Telegram errors are visible in responses, logs, and operation status (tests/test_cli_operations.py + tests/test_observability_logging.py)
+- [x] run full project test suite (304 passed in 6.39s)
+- [x] run project linter - all issues must be fixed (ruff check: all checks passed)
 
 ### Task 17: End-to-end testing
 - [ ] create data/config.yml with the test account
