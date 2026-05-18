@@ -10,7 +10,12 @@ import typer
 
 from telegram_planfix_assistant import __version__
 from telegram_planfix_assistant.config import ConfigError, load_config
-from telegram_planfix_assistant.health import collect_health
+from telegram_planfix_assistant.health import collect_health, default_database_path
+from telegram_planfix_assistant.persistence import (
+    OperationNotFoundError,
+    OperationStatus,
+    OperationStore,
+)
 from telegram_planfix_assistant.telegram_client.session import (
     TelethonSessionManager,
 )
@@ -241,16 +246,104 @@ operations_app = typer.Typer(help="Inspect and retry queued operations.", no_arg
 app.add_typer(operations_app, name="operations")
 
 
+def _open_store(config_path: Path | None) -> OperationStore:
+    config = _load_config_or_exit(config_path)
+    return OperationStore(default_database_path(config))
+
+
+def _operation_summary(store: OperationStore, operation_id: str) -> dict[str, object]:
+    try:
+        op = store.get_operation(operation_id)
+    except OperationNotFoundError as exc:
+        typer.echo(f"operation {operation_id} not found", err=True)
+        raise typer.Exit(code=2) from exc
+    items = store.list_items(op.id)
+    by_status: dict[str, int] = {}
+    for it in items:
+        by_status[it.status.value] = by_status.get(it.status.value, 0) + 1
+    payload: dict[str, object] = op.to_dict()
+    payload["items"] = {
+        "total": len(items),
+        "by_status": by_status,
+        "needs_review": [
+            {
+                "id": it.id,
+                "idempotency_key": it.idempotency_key,
+                "error": it.error,
+            }
+            for it in items
+            if it.status is OperationStatus.NEEDS_REVIEW
+        ],
+    }
+    return payload
+
+
 @operations_app.command("status")
-def operations_status() -> None:
-    """Show the status of an operation (Task 5)."""
-    _placeholder("operations", "status")
+def operations_status(
+    operation_id: str = typer.Option(
+        ...,
+        "--operation-id",
+        help="ID of the operation to inspect.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Show the status of an operation, including per-item summary."""
+    store = _open_store(config_path)
+    payload = _operation_summary(store, operation_id)
+    typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
 @operations_app.command("retry")
-def operations_retry() -> None:
-    """Retry a failed or needs_review operation (Task 5)."""
-    _placeholder("operations", "retry")
+def operations_retry(
+    operation_id: str = typer.Option(
+        ...,
+        "--operation-id",
+        help="ID of the operation to retry.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Reset a failed/needs_review operation (and its items) back to pending.
+
+    The actual re-execution is performed by the worker queue when it next
+    picks the operation up — this command only flips state so it becomes
+    eligible for retry.
+    """
+    store = _open_store(config_path)
+    try:
+        op = store.get_operation(operation_id)
+    except OperationNotFoundError as exc:
+        typer.echo(f"operation {operation_id} not found", err=True)
+        raise typer.Exit(code=2) from exc
+    if op.status is OperationStatus.COMPLETED:
+        typer.echo(
+            f"operation {operation_id} is completed; nothing to retry", err=True
+        )
+        raise typer.Exit(code=2)
+    reset_items = store.reset_items_for_retry(operation_id)
+    if op.status is not OperationStatus.PENDING:
+        store.reset_operation_for_retry(operation_id)
+    typer.echo(
+        json.dumps(
+            {
+                "operation_id": operation_id,
+                "operation_reset": op.status is not OperationStatus.PENDING,
+                "items_reset": [it.id for it in reset_items],
+            },
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

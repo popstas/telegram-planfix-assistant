@@ -1,1 +1,19 @@
-"""Async worker queue and FLOOD_WAIT handling (populated in Task 5)."""
+"""Async worker queue and FLOOD_WAIT handling."""
+
+from telegram_planfix_assistant.worker.queue import (
+    BulkItemSpec,
+    FloodWaitError,
+    ItemHandler,
+    NeedsReviewError,
+    OperationHandler,
+    WorkerQueue,
+)
+
+__all__ = [
+    "BulkItemSpec",
+    "FloodWaitError",
+    "ItemHandler",
+    "NeedsReviewError",
+    "OperationHandler",
+    "WorkerQueue",
+]
