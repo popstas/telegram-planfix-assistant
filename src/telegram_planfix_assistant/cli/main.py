@@ -708,9 +708,146 @@ def topics_bulk_create(
 
 
 @topics_app.command("close")
-def topics_close() -> None:
-    """Close a topic (Task 10)."""
-    _placeholder("topics", "close")
+def topics_close(
+    topic_id: int | None = typer.Option(
+        None,
+        "--topic-id",
+        help="Numeric forum topic id to close.",
+    ),
+    topic_name: str | None = typer.Option(
+        None,
+        "--topic-name",
+        help="Topic title to resolve within the chat (alternative to --topic-id).",
+    ),
+    chat_id: int | None = typer.Option(
+        None,
+        "--chat-id",
+        help="Numeric Telegram chat id of the supergroup.",
+    ),
+    chat_name: str | None = typer.Option(
+        None,
+        "--chat-name",
+        help="Chat title (resolved within --folder-name).",
+    ),
+    folder_name: str | None = typer.Option(
+        None,
+        "--folder-name",
+        help="Folder used for --chat-name lookup "
+        "(defaults to telegram.default_chat_folder.folder_name).",
+    ),
+    folder_id: int | None = typer.Option(
+        None,
+        "--folder-id",
+        help="Optional folder id cross-check.",
+    ),
+    reason: str | None = typer.Option(
+        None,
+        "--reason",
+        help="Optional human-readable reason; passed through to logs.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Close an existing forum topic (the topic and its history are kept)."""
+    from telegram_planfix_assistant.folders import (
+        FolderError,
+        resolve_chat_in_folder,
+    )
+    from telegram_planfix_assistant.topics import (
+        AmbiguousTopicNameError,
+        TopicCloseFailed,
+        TopicCloseNeedsReview,
+        TopicClosePending,
+        TopicCloseRequest,
+        TopicNotFoundError,
+        close_topic,
+        resolve_topic_id_by_name,
+    )
+
+    if (chat_id is None) == (chat_name is None):
+        typer.echo(
+            "exactly one of --chat-id or --chat-name must be supplied", err=True
+        )
+        raise typer.Exit(code=2)
+    if (topic_id is None) == (topic_name is None):
+        typer.echo(
+            "exactly one of --topic-id or --topic-name must be supplied", err=True
+        )
+        raise typer.Exit(code=2)
+
+    config, manager, store, open_backends = _build_topic_backends(config_path)
+
+    if chat_name is not None:
+        resolved_folder_name, default_fid, _ = _resolve_folder_name(
+            folder_name, config_path
+        )
+        effective_folder_id = folder_id if folder_id is not None else default_fid
+    else:
+        resolved_folder_name = folder_name
+        effective_folder_id = folder_id
+
+    async def _run() -> dict[str, object]:
+        try:
+            topic_backend, folder_backend = await open_backends()
+            if chat_id is not None:
+                resolved_chat_id = chat_id
+            else:
+                resolved = await resolve_chat_in_folder(
+                    folder_backend,
+                    folder_name=resolved_folder_name or "",
+                    chat_name=chat_name or "",
+                    folder_id=effective_folder_id,
+                )
+                resolved_chat_id = resolved.chat_id
+
+            if topic_id is not None:
+                effective_topic_id = topic_id
+            else:
+                effective_topic_id = await resolve_topic_id_by_name(
+                    backend=topic_backend,
+                    telegram_chat_id=resolved_chat_id,
+                    topic_name=topic_name or "",
+                )
+
+            request = TopicCloseRequest(
+                telegram_chat_id=resolved_chat_id,
+                telegram_topic_id=effective_topic_id,
+                reason=reason,
+            )
+            result, op = await close_topic(
+                backend=topic_backend, store=store, request=request
+            )
+            payload = result.to_dict()
+            payload["operation_id"] = op.id
+            payload["operation_status"] = op.status.value
+            return payload
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        payload = asyncio.run(_run())
+    except (TopicClosePending, TopicCloseNeedsReview, TopicCloseFailed) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except (AmbiguousTopicNameError, TopicNotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except FolderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"topics close failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
 # --- members ----------------------------------------------------------------

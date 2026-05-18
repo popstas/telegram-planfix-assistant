@@ -57,6 +57,35 @@ class BulkTopicCreatePending(TopicError):
     """A concurrent bulk-create attempt with this ``operation_id`` is in flight."""
 
 
+class TopicCloseFailed(TopicError):
+    """A previous close attempt with this idempotency key already failed."""
+
+
+class TopicClosePending(TopicError):
+    """A concurrent close attempt with this idempotency key is in flight."""
+
+
+class TopicCloseNeedsReview(TopicError):
+    """A previous close attempt resulted in needs_review."""
+
+
+class AmbiguousTopicNameError(TopicError):
+    """More than one topic in the chat shares the requested name."""
+
+    def __init__(self, *, topic_name: str, telegram_chat_id: int, matches: list[int]) -> None:
+        super().__init__(
+            f"topic name {topic_name!r} matches {len(matches)} topics in chat "
+            f"{telegram_chat_id}: {matches!r}"
+        )
+        self.topic_name = topic_name
+        self.telegram_chat_id = telegram_chat_id
+        self.matches = list(matches)
+
+
+class TopicNotFoundError(TopicError):
+    """No topic with the requested name exists in the chat."""
+
+
 class BulkTopicCreateNeedsReview(TopicError):
     """A previous bulk-create attempt ended in needs_review; operator must
     reset via ``operations retry`` to resume.
@@ -124,6 +153,15 @@ class TopicCreateResult:
         )
 
 
+@dataclass(frozen=True)
+class TopicSummary:
+    """One topic surfaced by :meth:`TopicBackend.list_topics`."""
+
+    topic_id: int
+    title: str
+    closed: bool = False
+
+
 class TopicBackend(Protocol):
     """Telethon-facing operations needed to create a forum topic.
 
@@ -136,6 +174,12 @@ class TopicBackend(Protocol):
     async def send_message(
         self, *, chat_id: int, text: str, topic_id: int | None = None
     ) -> int:
+        ...
+
+    async def close_topic(self, *, chat_id: int, topic_id: int) -> None:
+        ...
+
+    async def list_topics(self, *, chat_id: int) -> list[TopicSummary]:
         ...
 
 
@@ -607,3 +651,144 @@ async def bulk_create_topics(
         items=item_results,
     )
     return aggregated, final_parent
+
+
+# ---------------------------------------------------------------------------
+# Close topic
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TopicCloseRequest:
+    """Input shape for :func:`close_topic`."""
+
+    telegram_chat_id: int
+    telegram_topic_id: int
+    reason: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "telegram_chat_id": self.telegram_chat_id,
+            "telegram_topic_id": self.telegram_topic_id,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class TopicCloseResult:
+    """Result returned by both the live execution and a replay."""
+
+    telegram_chat_id: int
+    telegram_topic_id: int
+    status: str
+    reason: str | None = None
+    replayed: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "telegram_chat_id": self.telegram_chat_id,
+            "telegram_topic_id": self.telegram_topic_id,
+            "status": self.status,
+            "reason": self.reason,
+            "replayed": self.replayed,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> TopicCloseResult:
+        return cls(
+            telegram_chat_id=int(payload["telegram_chat_id"]),
+            telegram_topic_id=int(payload["telegram_topic_id"]),
+            status=str(payload.get("status", "closed")),
+            reason=payload.get("reason"),
+            replayed=True,
+        )
+
+
+async def resolve_topic_id_by_name(
+    *,
+    backend: TopicBackend,
+    telegram_chat_id: int,
+    topic_name: str,
+) -> int:
+    """Look up a single topic by exact title within a chat.
+
+    Ambiguous matches raise :class:`AmbiguousTopicNameError` so the caller can
+    disambiguate, rather than silently picking one. Missing topics raise
+    :class:`TopicNotFoundError`.
+    """
+    if not topic_name.strip():
+        raise ValueError("topic resolution requires non-empty topic_name")
+    summaries = await backend.list_topics(chat_id=telegram_chat_id)
+    matches = [t for t in summaries if t.title == topic_name]
+    if not matches:
+        raise TopicNotFoundError(
+            f"topic {topic_name!r} not found in chat {telegram_chat_id}"
+        )
+    if len(matches) > 1:
+        raise AmbiguousTopicNameError(
+            topic_name=topic_name,
+            telegram_chat_id=telegram_chat_id,
+            matches=[t.topic_id for t in matches],
+        )
+    return matches[0].topic_id
+
+
+async def close_topic(
+    *,
+    backend: TopicBackend,
+    store: OperationStore,
+    request: TopicCloseRequest,
+) -> tuple[TopicCloseResult, OperationRecord]:
+    """Close a forum topic, or replay the saved result for the same key.
+
+    Idempotency key: ``telegram_chat_id + telegram_topic_id`` (per the plan).
+    Re-close returns ``status=closed`` with ``replayed=True`` without touching
+    Telegram a second time. The topic itself and its history are never
+    deleted — closing only flips the topic's ``closed`` flag.
+    """
+    if request.telegram_topic_id <= 0:
+        raise ValueError("close_topic requires a positive telegram_topic_id")
+
+    key = idempotency.topic_close_key(
+        telegram_chat_id=request.telegram_chat_id,
+        telegram_topic_id=request.telegram_topic_id,
+    )
+    begin = store.begin_operation(
+        operation_type=idempotency.TOPIC_CLOSE,
+        idempotency_key=key,
+        request_payload=request.to_payload(),
+    )
+
+    if not begin.created:
+        op = begin.operation
+        if op.status is OperationStatus.COMPLETED:
+            payload = op.result_payload or {}
+            return TopicCloseResult.from_dict(payload), op
+        if op.status is OperationStatus.FAILED:
+            raise TopicCloseFailed(op.error or "previous attempt failed")
+        if op.status is OperationStatus.NEEDS_REVIEW:
+            raise TopicCloseNeedsReview(op.error or "previous attempt needs review")
+        raise TopicClosePending(
+            f"operation {op.id} is still pending; retry via 'operations retry'"
+        )
+
+    operation_id = begin.operation.id
+    try:
+        await backend.close_topic(
+            chat_id=request.telegram_chat_id,
+            topic_id=request.telegram_topic_id,
+        )
+    except TopicError:
+        raise
+    except Exception as exc:
+        store.fail_operation(operation_id, str(exc))
+        raise
+
+    result = TopicCloseResult(
+        telegram_chat_id=request.telegram_chat_id,
+        telegram_topic_id=request.telegram_topic_id,
+        status="closed",
+        reason=request.reason,
+    )
+    op = store.complete_operation(operation_id, result.to_dict())
+    return result, op

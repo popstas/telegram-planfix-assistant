@@ -25,11 +25,16 @@ from telegram_planfix_assistant.topics import (
     BulkTopicCreateRequest,
     BulkTopicItem,
     TopicBackend,
+    TopicCloseFailed,
+    TopicCloseNeedsReview,
+    TopicClosePending,
+    TopicCloseRequest,
     TopicCreateFailed,
     TopicCreateNeedsReview,
     TopicCreatePending,
     TopicCreateRequest,
     bulk_create_topics,
+    close_topic,
     create_topic,
 )
 from telegram_planfix_assistant.worker.queue import WorkerQueue
@@ -46,6 +51,24 @@ class TopicCreateBody(BaseModel):
 
     @model_validator(mode="after")
     def _exactly_one_chat_ref(self) -> TopicCreateBody:
+        if (self.telegram_chat_id is None) == (self.chat_name is None):
+            raise ValueError(
+                "provide exactly one of telegram_chat_id or chat_name"
+            )
+        if self.chat_name is not None and self.folder_name is None:
+            raise ValueError("chat_name requires folder_name")
+        return self
+
+
+class TopicCloseBody(BaseModel):
+    telegram_chat_id: int | None = None
+    chat_name: str | None = None
+    folder_name: str | None = None
+    folder_id: int | None = None
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_chat_ref(self) -> TopicCloseBody:
         if (self.telegram_chat_id is None) == (self.chat_name is None):
             raise ValueError(
                 "provide exactly one of telegram_chat_id or chat_name"
@@ -307,6 +330,60 @@ def build_router() -> APIRouter:
             ) from exc
 
         payload = result.to_dict()
+        payload["operation_status"] = op.status.value
+        return payload
+
+    @router.post("/topics/{topic_id}/close")
+    async def close(
+        topic_id: int, body: TopicCloseBody, request: Request
+    ) -> dict[str, Any]:
+        if topic_id <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="topic_id must be a positive integer",
+            )
+        backend = _topic_backend_or_503(request)
+        store = _store_or_503(request)
+        chat_id = await _resolve_chat_id_generic(
+            telegram_chat_id=body.telegram_chat_id,
+            chat_name=body.chat_name,
+            folder_name=body.folder_name,
+            folder_id=body.folder_id,
+            request=request,
+        )
+
+        domain_request = TopicCloseRequest(
+            telegram_chat_id=chat_id,
+            telegram_topic_id=topic_id,
+            reason=body.reason,
+        )
+
+        try:
+            result, op = await close_topic(
+                backend=backend, store=store, request=domain_request
+            )
+        except TopicClosePending as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": "pending", "message": str(exc)},
+            ) from exc
+        except TopicCloseNeedsReview as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"error": "needs_review", "message": str(exc)},
+            ) from exc
+        except TopicCloseFailed as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": "previous_attempt_failed", "message": str(exc)},
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+        payload = result.to_dict()
+        payload["operation_id"] = op.id
         payload["operation_status"] = op.status.value
         return payload
 
