@@ -70,6 +70,24 @@ class LoggingConfig(BaseModel):
         return up
 
 
+class AlertsConfig(BaseModel):
+    """Channel-agnostic alert configuration.
+
+    Alerts are always emitted to the JSON log via the default sink; setting
+    ``webhook_url`` adds an HTTPS POST sink on top. The numeric knobs let
+    operators tune how aggressive the FLOOD_WAIT, stuck-bulk, and error-rate
+    triggers are without touching code.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    webhook_url: str | None = None
+    flood_wait_repeat_threshold: int = Field(default=3, ge=1)
+    stuck_bulk_after_seconds: int = Field(default=600, ge=1)
+    error_rate_window: int = Field(default=20, ge=1)
+    error_rate_threshold: float = Field(default=0.5, gt=0.0, le=1.0)
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -77,3 +95,4 @@ class AppConfig(BaseModel):
     http: HttpConfig
     queue: QueueConfig = Field(default_factory=QueueConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    alerts: AlertsConfig = Field(default_factory=AlertsConfig)

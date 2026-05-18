@@ -111,6 +111,67 @@ oops: true
         load_config_from_text(bad)
 
 
+def test_alerts_defaults_applied() -> None:
+    minimal = """
+telegram:
+  api_id: 1
+  api_hash: "h"
+  session_path: /tmp/s
+  default_chat_folder:
+    folder_name: "X"
+http:
+  bearer_token: "tok"
+"""
+    config = load_config_from_text(minimal)
+    assert config.alerts.webhook_url is None
+    assert config.alerts.flood_wait_repeat_threshold == 3
+    assert config.alerts.stuck_bulk_after_seconds == 600
+    assert config.alerts.error_rate_window == 20
+    assert config.alerts.error_rate_threshold == 0.5
+
+
+def test_alerts_section_parsed_when_present() -> None:
+    src = """
+telegram:
+  api_id: 1
+  api_hash: "h"
+  session_path: /tmp/s
+  default_chat_folder:
+    folder_name: "X"
+http:
+  bearer_token: "tok"
+alerts:
+  webhook_url: "https://example.test/alert"
+  flood_wait_repeat_threshold: 5
+  stuck_bulk_after_seconds: 30
+  error_rate_window: 10
+  error_rate_threshold: 0.25
+"""
+    config = load_config_from_text(src)
+    assert config.alerts.webhook_url == "https://example.test/alert"
+    assert config.alerts.flood_wait_repeat_threshold == 5
+    assert config.alerts.stuck_bulk_after_seconds == 30
+    assert config.alerts.error_rate_window == 10
+    assert config.alerts.error_rate_threshold == 0.25
+
+
+def test_alerts_invalid_threshold_rejected() -> None:
+    bad = """
+telegram:
+  api_id: 1
+  api_hash: "h"
+  session_path: /tmp/s
+  default_chat_folder:
+    folder_name: "X"
+http:
+  bearer_token: "tok"
+alerts:
+  error_rate_threshold: 1.5
+"""
+    with pytest.raises(ConfigError):
+        load_config_from_text(bad)
+
+
 def test_invalid_logging_level_rejected() -> None:
     bad = """
 telegram:

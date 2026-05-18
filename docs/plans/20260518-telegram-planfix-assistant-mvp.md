@@ -269,12 +269,12 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 14: Structured logging and alert hooks
 
-- [ ] configure structured (JSON) logging carrying `operation_id`, request/invocation ID, `planfix_task_id`, `chat_name`, `topic_name`, `telegram_chat_id`, `telegram_topic_id`, operation type, bulk item, result, error, duration
-- [ ] redact secrets (bearer token, api_hash, invite links treated as sensitive) from logs
-- [ ] add alert hooks for: Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operation, operation moved to `needs_review`, default chat folder unavailable, error rate above threshold
-- [ ] expose alert configuration via `data/config.yml` (channel-agnostic — emit to logs at minimum, optional webhook)
-- [ ] write tests covering structured log shape, secret redaction, and each alert trigger
-- [ ] run project tests - must pass before next task
+- [x] configure structured (JSON) logging carrying `operation_id`, request/invocation ID, `planfix_task_id`, `chat_name`, `topic_name`, `telegram_chat_id`, `telegram_topic_id`, operation type, bulk item, result, error, duration
+- [x] redact secrets (bearer token, api_hash, invite links treated as sensitive) from logs
+- [x] add alert hooks for: Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operation, operation moved to `needs_review`, default chat folder unavailable, error rate above threshold
+- [x] expose alert configuration via `data/config.yml` (channel-agnostic — emit to logs at minimum, optional webhook)
+- [x] write tests covering structured log shape, secret redaction, and each alert trigger
+- [x] run project tests - must pass before next task
 
 ### Task 15: Docker image and deployment
 
