@@ -278,13 +278,13 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 15: Docker image and deployment
 
-- [ ] write a Dockerfile based on a slim Python 3.12 image
-- [ ] expose port 8085, mount `data/` as a volume, run `uvicorn` (or chosen ASGI server) as the default command
-- [ ] provide a `docker compose` example with the volume and environment wiring
-- [ ] document how to run the `auth` CLI inside the container (interactive shell), and how to run `health`
-- [ ] verify `GET /health` returns `200` from the container
-- [ ] write tests or a smoke script for container startup
-- [ ] run project tests - must pass before next task
+- [x] write a Dockerfile based on a slim Python 3.12 image
+- [x] expose port 8085, mount `data/` as a volume, run `uvicorn` (or chosen ASGI server) as the default command
+- [x] provide a `docker compose` example with the volume and environment wiring
+- [x] document how to run the `auth` CLI inside the container (interactive shell), and how to run `health`
+- [x] verify `GET /health` returns `200` from the container
+- [x] write tests or a smoke script for container startup
+- [x] run project tests - must pass before next task
 
 ### Task 16: Verify acceptance criteria
 
