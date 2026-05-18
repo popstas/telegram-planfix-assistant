@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import typer
 
 from telegram_planfix_assistant import __version__
 from telegram_planfix_assistant.config import ConfigError, load_config
+from telegram_planfix_assistant.health import collect_health
 from telegram_planfix_assistant.telegram_client.session import (
     TelethonSessionManager,
 )
@@ -99,10 +101,45 @@ def auth_cmd(
 # --- health -----------------------------------------------------------------
 
 
+def _load_config_or_exit(config_path: Path | None):
+    try:
+        return load_config(config_path)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+
 @app.command("health")
-def health_cmd() -> None:
-    """Show service health (Task 3)."""
-    _placeholder("health", "show")
+def health_cmd(
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Report service health (telegram session, database, default folder)."""
+    config = _load_config_or_exit(config_path)
+    manager = TelethonSessionManager(config.telegram)
+
+    async def _run() -> dict[str, str]:
+        try:
+            report = await collect_health(config, session_manager=manager)
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+        return report.to_dict()
+
+    try:
+        payload = asyncio.run(_run())
+    except Exception as exc:  # pragma: no cover - defensive guard
+        typer.echo(f"Health check failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True))
 
 
 # --- version ----------------------------------------------------------------

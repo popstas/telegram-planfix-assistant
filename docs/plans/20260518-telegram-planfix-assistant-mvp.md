@@ -151,11 +151,11 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 
 ### Task 3: Healthcheck (HTTP + CLI)
 
-- [ ] implement `GET /health` returning `status`, `telegram_session` (`authorized`/`unauthorized`), `database` (`ok`/`error`), `default_folder` (`ok`/`missing`)
-- [ ] implement `telegram-planfix-assistant health` CLI returning the same payload
-- [ ] add startup probe so the service responds to `/health` even when Telegram is reachable but session is unauthorized
-- [ ] write tests covering all health states (session authorized/unauthorized, DB ok/error, folder ok/missing)
-- [ ] run project tests - must pass before next task
+- [x] implement `GET /health` returning `status`, `telegram_session` (`authorized`/`unauthorized`), `database` (`ok`/`error`), `default_folder` (`ok`/`missing`)
+- [x] implement `telegram-planfix-assistant health` CLI returning the same payload
+- [x] add startup probe so the service responds to `/health` even when Telegram is reachable but session is unauthorized
+- [x] write tests covering all health states (session authorized/unauthorized, DB ok/error, folder ok/missing)
+- [x] run project tests - must pass before next task
 
 ### Task 4: Persistence and idempotency layer
 
