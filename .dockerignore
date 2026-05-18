@@ -1,0 +1,41 @@
+# Sensitive runtime state — must be provided via the mounted volume instead
+data/
+
+# Local virtual envs
+.venv/
+venv/
+env/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.so
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test / coverage caches
+.pytest_cache/
+.coverage*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# Editor / OS noise
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# VCS
+.git/
+.gitignore
+
+# Docs not needed in the image
+docs/
+tests/

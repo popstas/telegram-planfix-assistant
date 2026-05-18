@@ -29,6 +29,41 @@ Config is read from `data/config.yml` by default. The `data/` directory is exclu
 
 See `docs/plans/20260518-telegram-planfix-assistant-mvp.md` for the full configuration schema and feature scope.
 
+## Docker
+
+The service ships as a slim Python 3.12 image. Runtime state (Telethon session, SQLite database, `data/config.yml`, bearer token) lives in `/data`, which must be mounted as a volume — nothing sensitive is baked into the image.
+
+Build and run with `docker compose`:
+
+```bash
+mkdir -p data
+cp path/to/your/config.yml data/config.yml   # fill in api_id, api_hash, bearer_token, etc.
+docker compose up -d
+curl http://127.0.0.1:8085/health
+```
+
+Run a one-shot CLI invocation against the same volume:
+
+```bash
+docker compose run --rm telegram-planfix-assistant \
+    telegram-planfix-assistant health
+```
+
+The `auth` CLI is interactive (it prompts for phone, code, and optional 2FA password), so run it with a TTY attached:
+
+```bash
+docker compose run --rm -it telegram-planfix-assistant \
+    telegram-planfix-assistant auth
+```
+
+The Telethon session is written to `/data` and persists across container restarts.
+
+A self-contained smoke script lives at `scripts/docker-smoke.sh`. It builds the image, starts a throwaway container with a temporary `data/config.yml`, polls `GET /health` until it returns `200`, and tears everything down.
+
+```bash
+scripts/docker-smoke.sh
+```
+
 ## Tests
 
 ```bash
