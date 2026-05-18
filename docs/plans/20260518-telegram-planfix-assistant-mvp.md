@@ -312,6 +312,13 @@ Telethon session unauthorized, repeated `FLOOD_WAIT` in a row, stuck bulk operat
 - [ ] run full project test suite
 - [ ] run project linter - all issues must be fixed
 
+### Task 17: End-to-end testing
+- [ ] create data/config.yml with the test account
+- [ ] use data/sessions/expertizemeAssistant/session.session for the test account
+- [ ] use folder `Clients`, chat `Client chat test`, test actions against the test account
+- [ ] create new client chat `Client chat test 2`, add topics 'Topic 1', 'Topic 2', 'Topic 3', add user `@popstas`
+- [ ] run web server and test http endpoints against the test account
+
 ## Post-Completion
 
 *Items requiring manual intervention - no checkboxes, informational only*
