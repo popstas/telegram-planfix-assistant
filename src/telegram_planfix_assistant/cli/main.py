@@ -1108,10 +1108,322 @@ def members_bulk_add(
     typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
+def _parse_bulk_remove_csv(path: Path) -> list[str]:
+    """Read a `user` CSV into bulk-remove items.
+
+    Lines starting with ``#`` and blank rows are ignored so operators can
+    keep notes alongside the data.
+    """
+    import csv
+
+    out: list[str] = []
+    with path.open(newline="", encoding="utf-8") as fp:
+        reader = csv.DictReader(fp)
+        if reader.fieldnames is None or "user" not in set(reader.fieldnames):
+            raise typer.BadParameter(
+                f"CSV must have at least column 'user'; got {reader.fieldnames!r}"
+            )
+        for row in reader:
+            user = (row.get("user") or "").strip()
+            if not user or user.startswith("#"):
+                continue
+            out.append(user)
+    if not out:
+        raise typer.BadParameter("CSV produced zero items")
+    return out
+
+
+def _parse_bulk_remove_json(path: Path) -> list[str]:
+    """Read a JSON list of users (strings or `{user: ...}` objects)."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise typer.BadParameter("JSON file must contain a top-level list")
+    out: list[str] = []
+    for entry in raw:
+        if isinstance(entry, str):
+            user = entry.strip()
+        elif isinstance(entry, dict):
+            user = str(entry.get("user") or "").strip()
+        else:
+            raise typer.BadParameter(
+                "each JSON entry must be a string or {user: ...} object"
+            )
+        if not user:
+            raise typer.BadParameter("each entry needs a non-empty user")
+        out.append(user)
+    if not out:
+        raise typer.BadParameter("JSON file produced zero items")
+    return out
+
+
 @members_app.command("bulk-remove")
-def members_bulk_remove() -> None:
-    """Bulk-remove members (Task 12)."""
-    _placeholder("members", "bulk-remove")
+def members_bulk_remove(
+    chat_id: int | None = typer.Option(
+        None,
+        "--chat-id",
+        help="Numeric Telegram chat id of the supergroup.",
+    ),
+    chat_name: str | None = typer.Option(
+        None,
+        "--chat-name",
+        help="Chat title (resolved within --folder-name).",
+    ),
+    folder_name: str | None = typer.Option(
+        None,
+        "--folder-name",
+        help="Folder used for --chat-name lookup "
+        "(defaults to telegram.default_chat_folder.folder_name).",
+    ),
+    folder_id: int | None = typer.Option(
+        None,
+        "--folder-id",
+        help="Optional folder id cross-check.",
+    ),
+    file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--file",
+        help="CSV (user) or JSON list of users.",
+        exists=False,
+    ),
+    user: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--user",
+        help="User to remove (repeat for multiple).",
+    ),
+    mode: str = typer.Option(
+        "ban_unban",
+        "--mode",
+        help="Removal mode: ban_unban (kick, default) or ban (permanent blacklist).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the intended action per user without performing it.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help="Confirm destructive bulk removal (required unless --dry-run).",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Allow removing configured reserve accounts or @planfix_bot.",
+    ),
+    operation_id: str | None = typer.Option(
+        None,
+        "--operation-id",
+        help="Idempotency id for the bulk; rerunning with the same value resumes the batch.",
+    ),
+    continue_on_error: bool = typer.Option(
+        True,
+        "--continue-on-error/--stop-on-error",
+        help="Continue the batch after a single-item failure (default true).",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults to data/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Bulk-remove members from a supergroup (kick or permanently ban)."""
+    from telegram_planfix_assistant.folders import (
+        FolderError,
+        resolve_chat_in_folder,
+    )
+    from telegram_planfix_assistant.members import (
+        BulkMemberRemoveFailed,
+        BulkMemberRemoveItem,
+        BulkMemberRemoveNeedsReview,
+        BulkMemberRemovePending,
+        BulkMemberRemoveRequest,
+        bulk_remove_members,
+        normalize_user_ref,
+        protected_user_set,
+    )
+    from telegram_planfix_assistant.worker.queue import WorkerQueue
+
+    if (chat_id is None) == (chat_name is None):
+        typer.echo(
+            "exactly one of --chat-id or --chat-name must be supplied", err=True
+        )
+        raise typer.Exit(code=2)
+
+    raw_users: list[str] = []
+    if file is not None:
+        if not file.exists():
+            typer.echo(f"--file path does not exist: {file}", err=True)
+            raise typer.Exit(code=2)
+        raw_users.extend(
+            _parse_bulk_remove_json(file)
+            if file.suffix.lower() == ".json"
+            else _parse_bulk_remove_csv(file)
+        )
+    for u in user or []:
+        raw_users.append(u)
+
+    if not raw_users:
+        typer.echo("no users supplied: use --file or --user", err=True)
+        raise typer.Exit(code=2)
+
+    if not dry_run and not yes:
+        typer.echo(
+            "refusing to remove without --yes (or use --dry-run to preview)",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    config, manager, store, open_backends = _build_member_backends(config_path)
+    protected = protected_user_set(config=config.telegram)
+    try:
+        normalized_inputs = [
+            (raw, normalize_user_ref(raw)) for raw in raw_users
+        ]
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    if not force:
+        blocked = [
+            raw for raw, n in normalized_inputs if n.value in protected
+        ]
+        if blocked:
+            typer.echo(
+                "refusing to remove protected accounts without --force: "
+                + ", ".join(blocked),
+                err=True,
+            )
+            raise typer.Exit(code=2)
+
+    if chat_name is not None:
+        resolved_folder_name, default_fid, _ = _resolve_folder_name(
+            folder_name, config_path
+        )
+        effective_folder_id = folder_id if folder_id is not None else default_fid
+    else:
+        resolved_folder_name = folder_name
+        effective_folder_id = folder_id
+
+    if dry_run:
+        async def _resolve_chat() -> int:
+            try:
+                _, folder_backend = await open_backends()
+                if chat_id is not None:
+                    return chat_id
+                resolved = await resolve_chat_in_folder(
+                    folder_backend,
+                    folder_name=resolved_folder_name or "",
+                    chat_name=chat_name or "",
+                    folder_id=effective_folder_id,
+                )
+                return resolved.chat_id
+            finally:
+                try:
+                    await manager.disconnect()
+                except Exception:
+                    pass
+
+        try:
+            resolved_chat_id = asyncio.run(_resolve_chat())
+        except FolderError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except Exception as exc:
+            typer.echo(f"members bulk-remove failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        items_out: list[dict[str, object]] = []
+        for raw, n in normalized_inputs:
+            items_out.append(
+                {
+                    "user": raw,
+                    "normalized_user": n.value,
+                    "user_kind": n.kind,
+                    "action": "would_remove",
+                    "protected": n.value in protected,
+                }
+            )
+        payload: dict[str, object] = {
+            "dry_run": True,
+            "telegram_chat_id": resolved_chat_id,
+            "mode": mode,
+            "items": items_out,
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, default=str))
+        return
+
+    queue = WorkerQueue(
+        store,
+        max_parallel=config.queue.max_parallel_telegram_ops,
+        flood_wait_safety_margin_seconds=config.queue.flood_wait_safety_margin_seconds,
+        default_retry_delay_seconds=config.queue.default_retry_delay_seconds,
+    )
+
+    async def _run() -> dict[str, object]:
+        try:
+            member_backend, folder_backend = await open_backends()
+            if chat_id is not None:
+                resolved_chat_id = chat_id
+            else:
+                resolved = await resolve_chat_in_folder(
+                    folder_backend,
+                    folder_name=resolved_folder_name or "",
+                    chat_name=chat_name or "",
+                    folder_id=effective_folder_id,
+                )
+                resolved_chat_id = resolved.chat_id
+
+            try:
+                items = tuple(
+                    BulkMemberRemoveItem(user=raw)
+                    for raw, _ in normalized_inputs
+                )
+                req = BulkMemberRemoveRequest(
+                    telegram_chat_id=resolved_chat_id,
+                    items=items,
+                    mode=mode,
+                    continue_on_error=continue_on_error,
+                    operation_id=operation_id,
+                )
+            except ValueError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(code=2) from exc
+            result, op = await bulk_remove_members(
+                backend=member_backend,
+                store=store,
+                queue=queue,
+                request=req,
+            )
+            payload = result.to_dict()
+            payload["operation_status"] = op.status.value
+            return payload
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        payload = asyncio.run(_run())
+    except (
+        BulkMemberRemovePending,
+        BulkMemberRemoveNeedsReview,
+        BulkMemberRemoveFailed,
+    ) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except FolderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        typer.echo(f"members bulk-remove failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
 # --- messages ---------------------------------------------------------------

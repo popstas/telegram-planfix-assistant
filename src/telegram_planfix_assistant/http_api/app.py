@@ -17,7 +17,7 @@ from telegram_planfix_assistant.http_api.folders import build_router as build_fo
 from telegram_planfix_assistant.http_api.groups import build_router as build_groups_router
 from telegram_planfix_assistant.http_api.members import build_router as build_members_router
 from telegram_planfix_assistant.http_api.topics import build_router as build_topics_router
-from telegram_planfix_assistant.members import MemberAddBackend
+from telegram_planfix_assistant.members import MemberAddBackend, MemberRemoveBackend
 from telegram_planfix_assistant.persistence.store import OperationStore
 from telegram_planfix_assistant.telegram_client.session import (
     TelethonSessionManager,
@@ -28,6 +28,7 @@ FolderBackendFactory = Callable[[Request], FolderBackend | None]
 GroupBackendFactory = Callable[[Request], GroupBackend | None]
 TopicBackendFactory = Callable[[Request], TopicBackend | None]
 MemberBackendFactory = Callable[[Request], MemberAddBackend | None]
+MemberRemoveBackendFactory = Callable[[Request], MemberRemoveBackend | None]
 
 
 def _build_health_router() -> APIRouter:
@@ -118,7 +119,12 @@ def _default_topic_backend_factory(
 def _default_member_backend_factory(
     session_manager: TelethonSessionManager | None,
 ) -> MemberBackendFactory:
-    """Build a Telethon-backed member backend factory."""
+    """Build a Telethon-backed member backend factory.
+
+    The same Telethon adapter implements both the add and remove protocols,
+    so the remove endpoint reuses this factory when no dedicated remove
+    factory is supplied.
+    """
 
     def _factory(_request: Request) -> MemberAddBackend | None:
         if session_manager is None:
@@ -169,6 +175,7 @@ def create_app(
     group_backend_factory: GroupBackendFactory | None = None,
     topic_backend_factory: TopicBackendFactory | None = None,
     member_backend_factory: MemberBackendFactory | None = None,
+    member_remove_backend_factory: MemberRemoveBackendFactory | None = None,
     operation_store: OperationStore | None = None,
 ) -> FastAPI:
     """Build a FastAPI instance.
@@ -214,6 +221,7 @@ def create_app(
         if member_backend_factory is not None
         else _default_member_backend_factory(session_manager)
     )
+    app.state.member_remove_backend_factory = member_remove_backend_factory
     if operation_store is not None:
         app.state.operation_store = operation_store
     else:
