@@ -18,15 +18,19 @@ First-message logic, in order:
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from telegram_planfix_assistant.persistence import idempotency
 from telegram_planfix_assistant.persistence.models import (
+    OperationItemRecord,
     OperationRecord,
     OperationStatus,
 )
 from telegram_planfix_assistant.persistence.store import OperationStore
+from telegram_planfix_assistant.worker.queue import BulkItemSpec, WorkerQueue
 
 
 class TopicError(RuntimeError):
@@ -43,6 +47,20 @@ class TopicCreatePending(TopicError):
 
 class TopicCreateNeedsReview(TopicError):
     """A previous attempt resulted in ``needs_review`` and must not auto-retry."""
+
+
+class BulkTopicCreateFailed(TopicError):
+    """A previous bulk-create attempt with this ``operation_id`` already failed."""
+
+
+class BulkTopicCreatePending(TopicError):
+    """A concurrent bulk-create attempt with this ``operation_id`` is in flight."""
+
+
+class BulkTopicCreateNeedsReview(TopicError):
+    """A previous bulk-create attempt ended in needs_review; operator must
+    reset via ``operations retry`` to resume.
+    """
 
 
 @dataclass(frozen=True)
@@ -229,3 +247,363 @@ async def create_topic(
 
     op = store.complete_operation(operation_id, result.to_dict())
     return result, op
+
+
+# ---------------------------------------------------------------------------
+# Bulk topic creation
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BulkTopicItem:
+    """One row inside a bulk topic-create request."""
+
+    topic_name: str
+    planfix_task_id: int | str | None = None
+    message: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "topic_name": self.topic_name,
+            "planfix_task_id": self.planfix_task_id,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class BulkTopicCreateRequest:
+    """Input to :func:`bulk_create_topics`."""
+
+    telegram_chat_id: int
+    items: Sequence[BulkTopicItem]
+    continue_on_error: bool = True
+    operation_id: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "telegram_chat_id": self.telegram_chat_id,
+            "items": [it.to_payload() for it in self.items],
+            "continue_on_error": self.continue_on_error,
+            "operation_id": self.operation_id,
+        }
+
+
+@dataclass(frozen=True)
+class BulkTopicItemResult:
+    """One row in the aggregated response.
+
+    ``status`` is one of ``created`` | ``existed`` | ``failed`` |
+    ``needs_review`` | ``skipped``. ``existed`` is a per-bulk replay (same
+    ``operation_id`` re-issued) of a previously-completed item.
+    """
+
+    status: str
+    topic_name: str
+    planfix_task_id: int | str | None
+    telegram_topic_id: int | None = None
+    first_message_kind: str | None = None
+    first_message_text: str | None = None
+    telegram_message_id: int | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "topic_name": self.topic_name,
+            "planfix_task_id": self.planfix_task_id,
+            "telegram_topic_id": self.telegram_topic_id,
+            "first_message_kind": self.first_message_kind,
+            "first_message_text": self.first_message_text,
+            "telegram_message_id": self.telegram_message_id,
+            "error": self.error,
+        }
+
+
+@dataclass(frozen=True)
+class BulkTopicCreateResult:
+    """Aggregated outcome of :func:`bulk_create_topics`."""
+
+    operation_id: str
+    telegram_chat_id: int
+    created: int
+    existed: int
+    failed: int
+    needs_review: int
+    skipped: int
+    items: list[BulkTopicItemResult]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "operation_id": self.operation_id,
+            "telegram_chat_id": self.telegram_chat_id,
+            "created": self.created,
+            "existed": self.existed,
+            "failed": self.failed,
+            "needs_review": self.needs_review,
+            "skipped": self.skipped,
+            "items": [it.to_dict() for it in self.items],
+        }
+
+
+def _bulk_parent_key(operation_id: str | None) -> tuple[str, str]:
+    """Return ``(key, effective_id)`` for the bulk parent row.
+
+    Callers supplying an explicit ``operation_id`` get idempotent replay
+    against that id; otherwise we mint a fresh one so each call is independent.
+    """
+    if operation_id is not None and str(operation_id).strip():
+        oid = str(operation_id).strip()
+    else:
+        oid = uuid.uuid4().hex
+    return f"{idempotency.TOPIC_BULK_CREATE}:id={oid}", oid
+
+
+def _item_status(record: OperationItemRecord | None, was_existing: bool) -> str:
+    """Map an item record to the response-side status string."""
+    if record is None:
+        return "skipped"
+    if record.status is OperationStatus.COMPLETED:
+        return "existed" if was_existing else "created"
+    if record.status is OperationStatus.FAILED:
+        return "failed"
+    if record.status is OperationStatus.NEEDS_REVIEW:
+        return "needs_review"
+    return "skipped"
+
+
+def _build_item_result(
+    *,
+    item_input: BulkTopicItem,
+    record: OperationItemRecord | None,
+    was_existing: bool,
+) -> BulkTopicItemResult:
+    status = _item_status(record, was_existing)
+    if record is None:
+        return BulkTopicItemResult(
+            status=status,
+            topic_name=item_input.topic_name,
+            planfix_task_id=item_input.planfix_task_id,
+        )
+    if record.status is OperationStatus.COMPLETED:
+        payload = record.result_payload or {}
+        return BulkTopicItemResult(
+            status=status,
+            topic_name=item_input.topic_name,
+            planfix_task_id=item_input.planfix_task_id,
+            telegram_topic_id=(
+                int(payload["telegram_topic_id"])
+                if payload.get("telegram_topic_id") is not None
+                else None
+            ),
+            first_message_kind=payload.get("first_message_kind"),
+            first_message_text=payload.get("first_message_text"),
+            telegram_message_id=(
+                int(payload["telegram_message_id"])
+                if payload.get("telegram_message_id") is not None
+                else None
+            ),
+        )
+    return BulkTopicItemResult(
+        status=status,
+        topic_name=item_input.topic_name,
+        planfix_task_id=item_input.planfix_task_id,
+        error=record.error,
+    )
+
+
+def _replay_bulk(
+    *,
+    parent_op: OperationRecord,
+    specs: Sequence[BulkItemSpec],
+    request: BulkTopicCreateRequest,
+    store: OperationStore,
+) -> BulkTopicCreateResult:
+    """Reconstruct the aggregated response from saved item state.
+
+    Used when a previous bulk with the same ``operation_id`` already
+    completed — we never touch Telegram, just rebuild the response.
+    """
+    items_by_key = {
+        rec.idempotency_key: rec for rec in store.list_items(parent_op.id)
+    }
+    item_results: list[BulkTopicItemResult] = []
+    counts = {"created": 0, "existed": 0, "failed": 0, "needs_review": 0, "skipped": 0}
+    for spec, item_input in zip(specs, request.items, strict=True):
+        rec = items_by_key.get(spec.idempotency_key)
+        # On replay everything that's completed is reported as `existed` so
+        # the caller can tell the rerun apart from the original.
+        built = _build_item_result(
+            item_input=item_input, record=rec, was_existing=True
+        )
+        item_results.append(built)
+        counts[built.status] = counts.get(built.status, 0) + 1
+    return BulkTopicCreateResult(
+        operation_id=parent_op.id,
+        telegram_chat_id=request.telegram_chat_id,
+        created=counts["created"],
+        existed=counts["existed"],
+        failed=counts["failed"],
+        needs_review=counts["needs_review"],
+        skipped=counts["skipped"],
+        items=item_results,
+    )
+
+
+async def bulk_create_topics(
+    *,
+    backend: TopicBackend,
+    store: OperationStore,
+    queue: WorkerQueue,
+    request: BulkTopicCreateRequest,
+) -> tuple[BulkTopicCreateResult, OperationRecord]:
+    """Create many forum topics under one parent operation.
+
+    The parent operation is keyed by ``request.operation_id`` if supplied (so
+    the same bulk can be retried idempotently), otherwise a fresh UUID. Each
+    item is persisted under ``operation_items`` keyed by
+    ``bulk_item_key(parent_op.id, topic_create_key(...))`` so a restart
+    resumes exactly where the previous run left off.
+
+    Per-item first-message logic mirrors :func:`create_topic`: ``/task <id>``
+    when ``planfix_task_id`` is set, else the explicit ``message``, else the
+    topic name itself.
+    """
+    if not request.items:
+        raise ValueError("bulk topic create requires at least one item")
+    for it in request.items:
+        if not it.topic_name.strip():
+            raise ValueError("bulk topic create requires non-empty topic_name per item")
+
+    parent_key, _ = _bulk_parent_key(request.operation_id)
+    begin = store.begin_operation(
+        operation_type=idempotency.TOPIC_BULK_CREATE,
+        idempotency_key=parent_key,
+        request_payload=request.to_payload(),
+    )
+    parent_op = begin.operation
+
+    # Compute per-item specs once — needed both for replay reconstruction and
+    # for the queue's run_bulk.
+    specs: list[BulkItemSpec] = []
+    for it in request.items:
+        per_key = idempotency.topic_create_key(
+            planfix_task_id=it.planfix_task_id,
+            telegram_chat_id=request.telegram_chat_id,
+            topic_name=it.topic_name,
+        )
+        bulk_key = idempotency.bulk_item_key(
+            operation_id=parent_op.id, per_item_key=per_key
+        )
+        specs.append(
+            BulkItemSpec(
+                idempotency_key=bulk_key,
+                payload={
+                    "telegram_chat_id": request.telegram_chat_id,
+                    "topic_name": it.topic_name,
+                    "planfix_task_id": it.planfix_task_id,
+                    "message": it.message,
+                },
+            )
+        )
+
+    if not begin.created:
+        # Existing parent — mirror the single-topic state machine.
+        if parent_op.status is OperationStatus.COMPLETED:
+            return (
+                _replay_bulk(
+                    parent_op=parent_op,
+                    specs=specs,
+                    request=request,
+                    store=store,
+                ),
+                parent_op,
+            )
+        if parent_op.status is OperationStatus.FAILED:
+            raise BulkTopicCreateFailed(parent_op.error or "previous bulk failed")
+        if parent_op.status is OperationStatus.NEEDS_REVIEW:
+            raise BulkTopicCreateNeedsReview(
+                parent_op.error or "previous bulk needs review"
+            )
+        # PENDING → fall through and resume work below.
+
+    # Snapshot which items were already completed BEFORE this call, so we can
+    # distinguish "existed" (replay from a prior run with the same
+    # operation_id) from "created" (executed in this run).
+    pre_existing_completed = {
+        it.idempotency_key
+        for it in store.list_items(parent_op.id)
+        if it.status is OperationStatus.COMPLETED
+    }
+
+    async def _handler(spec: BulkItemSpec) -> dict[str, Any]:
+        payload = spec.payload
+        item_request = TopicCreateRequest(
+            telegram_chat_id=int(payload["telegram_chat_id"]),
+            topic_name=str(payload["topic_name"]),
+            planfix_task_id=payload.get("planfix_task_id"),
+            message=payload.get("message"),
+        )
+        # Bypass create_topic() here: a FLOOD_WAIT from the backend must
+        # propagate up to the queue, but create_topic()'s broad
+        # `except Exception` would mark the per-topic operation `failed`
+        # instead. Calling the executor directly keeps the queue in charge
+        # of FLOOD_WAIT handling.
+        result = await _execute_create(backend=backend, request=item_request)
+        return result.to_dict()
+
+    item_records = await queue.run_bulk(
+        parent_op.id,
+        specs,
+        _handler,
+        stop_on_failure=not request.continue_on_error,
+    )
+
+    # Build the aggregated response. run_bulk may have returned fewer records
+    # than specs when stop_on_failure short-circuited the loop; for items it
+    # never reached we report `skipped`.
+    records_by_key: dict[str, OperationItemRecord] = {
+        rec.idempotency_key: rec for rec in item_records
+    }
+    item_results: list[BulkTopicItemResult] = []
+    counts = {"created": 0, "existed": 0, "failed": 0, "needs_review": 0, "skipped": 0}
+    for spec, item_input in zip(specs, request.items, strict=True):
+        rec = records_by_key.get(spec.idempotency_key)
+        was_existing = spec.idempotency_key in pre_existing_completed
+        built = _build_item_result(
+            item_input=item_input, record=rec, was_existing=was_existing
+        )
+        item_results.append(built)
+        counts[built.status] = counts.get(built.status, 0) + 1
+
+    # Decide the parent operation's final status. ``completed`` only when no
+    # item ended in failed/needs_review and nothing was skipped by
+    # stop_on_failure. Otherwise ``needs_review`` so the operator inspects via
+    # `operations status`.
+    parent_payload = {
+        "telegram_chat_id": request.telegram_chat_id,
+        "counts": counts,
+        "operation_id": parent_op.id,
+    }
+    if counts["failed"] == 0 and counts["needs_review"] == 0 and counts["skipped"] == 0:
+        final_parent = store.complete_operation(parent_op.id, parent_payload)
+    else:
+        # Surface the situation to operators without auto-retry.
+        final_parent = store.mark_needs_review(
+            parent_op.id,
+            f"bulk_topic_create finished with "
+            f"failed={counts['failed']}, "
+            f"needs_review={counts['needs_review']}, "
+            f"skipped={counts['skipped']}",
+        )
+
+    aggregated = BulkTopicCreateResult(
+        operation_id=parent_op.id,
+        telegram_chat_id=request.telegram_chat_id,
+        created=counts["created"],
+        existed=counts["existed"],
+        failed=counts["failed"],
+        needs_review=counts["needs_review"],
+        skipped=counts["skipped"],
+        items=item_results,
+    )
+    return aggregated, final_parent
