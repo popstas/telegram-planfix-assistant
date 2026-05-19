@@ -203,7 +203,7 @@ def test_cli_members_bulk_add_dry_run_envelope(
     assert len(items) == 2
     actions = {it["normalized_user"]: it["action"] for it in items}
     assert actions["@alice"] == "would_add"
-    assert actions["@bob"] == "would_promote"
+    assert actions["@bob"] == "would_add_and_promote"
     # No mutation occurred.
     assert backend.added == []
     assert backend.promoted == []
@@ -432,6 +432,64 @@ def test_cli_members_bulk_remove_dry_run_resolves_chat_name(
     assert payload["resolved"]["telegram_chat_id"] == -500
     assert payload["resolved"]["chat_name"] == "Acme"
     assert payload["resolved"]["folder_name"] == "Planfix clients"
+
+
+def test_cli_members_bulk_remove_dry_run_previews_protected_without_force(
+    minimal_config_yaml: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run with a protected account and no --force must preview (not exit 2)."""
+    config_file = _write_config(tmp_path, minimal_config_yaml)
+
+    class _RemoveBackend:
+        async def ban_member(self, *, chat_id: int, user: str) -> None:  # pragma: no cover
+            raise AssertionError("dry-run must not call backend")
+
+        async def unban_member(self, *, chat_id: int, user: str) -> None:  # pragma: no cover
+            raise AssertionError("dry-run must not call backend")
+
+    backend = _RemoveBackend()
+    folder_backend = RecordingFolderBackend()
+    store = OperationStore(tmp_path / "state.db")
+
+    class _FakeManager:
+        async def disconnect(self) -> None:
+            return None
+
+    def _factory(config_path: Path | None) -> Any:
+        from telegram_planfix_assistant.config import load_config
+
+        config = load_config(config_path)
+
+        async def _open() -> Any:
+            return backend, folder_backend
+
+        return config, _FakeManager(), store, _open
+
+    monkeypatch.setattr(cli_main, "_build_member_backends", _factory)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "members",
+            "bulk-remove",
+            "--chat-id",
+            "-100",
+            "--user",
+            "@planfix_bot",
+            "--dry-run",
+            "--config",
+            str(config_file),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    items = payload["resolved"]["items"]
+    assert any(it["protected"] for it in items)
+    assert any("protected" in w for w in payload["warnings"])
+    assert _operation_count(store) == 0
 
 
 # ---------------------------------------------------------------------------

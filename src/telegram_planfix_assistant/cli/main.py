@@ -1566,7 +1566,7 @@ def members_bulk_add(
                     "role": item.role,
                     "normalized_user": n.value,
                     "user_kind": n.kind,
-                    "action": "would_promote" if item.role == "admin" else "would_add",
+                    "action": "would_add_and_promote" if item.role == "admin" else "would_add",
                     "protected": is_protected,
                     "duplicate_in_file": is_duplicate,
                 }
@@ -1859,7 +1859,7 @@ def members_bulk_remove(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
-    if not force:
+    if not force and not dry_run:
         blocked = [
             raw for raw, n in normalized_inputs if n.value in protected
         ]
