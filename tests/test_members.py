@@ -145,6 +145,14 @@ def test_normalize_user_ref_rejects_empty() -> None:
         normalize_user_ref("   ")
 
 
+def test_normalize_user_ref_lowercases_username() -> None:
+    """Telegram usernames are case-insensitive; canonical value must match."""
+    assert normalize_user_ref("@PlanFix_Bot").value == "@planfix_bot"
+    assert normalize_user_ref("PlanFix_Bot").value == "@planfix_bot"
+    # raw input is preserved for audit
+    assert normalize_user_ref("@PlanFix_Bot").raw == "@PlanFix_Bot"
+
+
 # ---------------------------------------------------------------------------
 # Domain tests
 # ---------------------------------------------------------------------------

@@ -492,6 +492,151 @@ def test_cli_members_bulk_remove_dry_run_previews_protected_without_force(
     assert _operation_count(store) == 0
 
 
+def test_cli_members_bulk_remove_dry_run_chat_id_skips_open_backends(
+    minimal_config_yaml: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With --chat-id, dry-run must NOT open the Telethon backend at all —
+    no folder lookup is needed, so the advertised offline preview must work
+    even if Telegram is unreachable or the session is unauthorized.
+    """
+    config_file = _write_config(tmp_path, minimal_config_yaml)
+    store = OperationStore(tmp_path / "state.db")
+
+    class _FakeManager:
+        async def disconnect(self) -> None:
+            return None
+
+    def _factory(config_path: Path | None) -> Any:
+        from telegram_planfix_assistant.config import load_config
+
+        config = load_config(config_path)
+
+        async def _open() -> Any:  # pragma: no cover
+            raise AssertionError(
+                "dry-run with --chat-id must not open Telethon backends"
+            )
+
+        return config, _FakeManager(), store, _open
+
+    monkeypatch.setattr(cli_main, "_build_member_backends", _factory)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "members",
+            "bulk-remove",
+            "--chat-id",
+            "-100",
+            "--user",
+            "@alice",
+            "--dry-run",
+            "--config",
+            str(config_file),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["resolved"]["telegram_chat_id"] == -100
+    assert _operation_count(store) == 0
+
+
+def test_cli_members_bulk_remove_dry_run_rejects_invalid_mode(
+    minimal_config_yaml: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run must reject invalid --mode the same way the real run would,
+    so dry-run is a faithful preflight (not a permissive preview).
+    """
+    config_file = _write_config(tmp_path, minimal_config_yaml)
+    store = OperationStore(tmp_path / "state.db")
+
+    class _FakeManager:
+        async def disconnect(self) -> None:  # pragma: no cover
+            return None
+
+    def _factory(config_path: Path | None) -> Any:
+        from telegram_planfix_assistant.config import load_config
+
+        config = load_config(config_path)
+
+        async def _open() -> Any:  # pragma: no cover
+            raise AssertionError("invalid mode must fail before any backend call")
+
+        return config, _FakeManager(), store, _open
+
+    monkeypatch.setattr(cli_main, "_build_member_backends", _factory)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "members",
+            "bulk-remove",
+            "--chat-id",
+            "-100",
+            "--user",
+            "@alice",
+            "--mode",
+            "purge",
+            "--dry-run",
+            "--config",
+            str(config_file),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "invalid mode" in (result.stderr or result.stdout)
+
+
+def test_cli_members_bulk_remove_protected_case_insensitive(
+    minimal_config_yaml: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Protected-account guard must catch case variants — Telegram usernames
+    are case-insensitive, so @PlanFix_Bot must be guarded just like @planfix_bot.
+    """
+    config_file = _write_config(tmp_path, minimal_config_yaml)
+    store = OperationStore(tmp_path / "state.db")
+
+    class _FakeManager:
+        async def disconnect(self) -> None:  # pragma: no cover
+            return None
+
+    def _factory(config_path: Path | None) -> Any:
+        from telegram_planfix_assistant.config import load_config
+
+        config = load_config(config_path)
+
+        async def _open() -> Any:  # pragma: no cover
+            raise AssertionError("guard must reject before opening backends")
+
+        return config, _FakeManager(), store, _open
+
+    monkeypatch.setattr(cli_main, "_build_member_backends", _factory)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "members",
+            "bulk-remove",
+            "--chat-id",
+            "-100",
+            "--user",
+            "@PlanFix_Bot",
+            "--yes",
+            "--config",
+            str(config_file),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "protected" in (result.stderr or result.stdout)
+
+
 # ---------------------------------------------------------------------------
 # messages send (targeted)
 # ---------------------------------------------------------------------------

@@ -1831,11 +1831,19 @@ def members_bulk_remove(
         normalize_user_ref,
         protected_user_set,
     )
+    from telegram_planfix_assistant.members.service import VALID_REMOVE_MODES
     from telegram_planfix_assistant.worker.queue import WorkerQueue
 
     if (chat_id is None) == (chat_name is None):
         typer.echo(
             "exactly one of --chat-id or --chat-name must be supplied", err=True
+        )
+        raise typer.Exit(code=2)
+
+    if mode not in VALID_REMOVE_MODES:
+        typer.echo(
+            f"invalid mode {mode!r}; expected one of {sorted(VALID_REMOVE_MODES)}",
+            err=True,
         )
         raise typer.Exit(code=2)
 
@@ -1895,32 +1903,33 @@ def members_bulk_remove(
         effective_folder_id = folder_id
 
     if dry_run:
-        async def _resolve_chat() -> int:
-            try:
-                _, folder_backend = await open_backends()
-                if chat_id is not None:
-                    return chat_id
-                resolved = await resolve_chat_in_folder(
-                    folder_backend,
-                    folder_name=resolved_folder_name or "",
-                    chat_name=chat_name or "",
-                    folder_id=effective_folder_id,
-                )
-                return resolved.chat_id
-            finally:
+        if chat_id is not None:
+            resolved_chat_id = chat_id
+        else:
+            async def _resolve_chat() -> int:
                 try:
-                    await manager.disconnect()
-                except Exception:
-                    pass
+                    _, folder_backend = await open_backends()
+                    resolved = await resolve_chat_in_folder(
+                        folder_backend,
+                        folder_name=resolved_folder_name or "",
+                        chat_name=chat_name or "",
+                        folder_id=effective_folder_id,
+                    )
+                    return resolved.chat_id
+                finally:
+                    try:
+                        await manager.disconnect()
+                    except Exception:
+                        pass
 
-        try:
-            resolved_chat_id = asyncio.run(_resolve_chat())
-        except FolderError as exc:
-            typer.echo(str(exc), err=True)
-            raise typer.Exit(code=2) from exc
-        except Exception as exc:
-            typer.echo(f"members bulk-remove failed: {exc}", err=True)
-            raise typer.Exit(code=1) from exc
+            try:
+                resolved_chat_id = asyncio.run(_resolve_chat())
+            except FolderError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(code=2) from exc
+            except Exception as exc:
+                typer.echo(f"members bulk-remove failed: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
 
         items_out: list[dict[str, object]] = []
         planned: list[str] = []
