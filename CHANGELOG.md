@@ -5,6 +5,7 @@
 
 ### Features
 
+- telegram: Add proxy_url config option
 - config: Add ~/.config fallback and bootstrap
 - Verify acceptance criteria for telegram skill and dry-run
 - Add error guidance, clarification templates, and scope boundaries to SKILL.md
