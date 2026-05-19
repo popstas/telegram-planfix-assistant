@@ -5,6 +5,7 @@
 
 ### Features
 
+- Verify acceptance criteria for telegram skill and dry-run
 - Add error guidance, clarification templates, and scope boundaries to SKILL.md
 - Document all 13 resource/action pairs and scenarios in SKILL.md
 - Add SKILL.md skeleton and shared agent rules
