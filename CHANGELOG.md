@@ -34,6 +34,7 @@
 
 ### Bug Fixes
 
+- Address codex review findings
 - Address code review findings
 - review: Unblock bulk-remove --dry-run for protected accounts
 - review: Address code review findings
