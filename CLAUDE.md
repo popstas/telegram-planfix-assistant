@@ -21,8 +21,8 @@ All runtime state — `config.yml`, Telethon session, SQLite DB, bearer token �
 - Tests: `pytest` (asyncio mode auto). Single test: `pytest tests/test_groups.py::test_name` or filter with `-k pattern`
 - Lint: `ruff check src tests` (line-length 100, py312, ignores E501)
 - Generate changelog: `git-cliff -o CHANGELOG.md` (also runs via pre-commit on commit)
-- Docker smoke (build + `/health` poll + teardown): `scripts/docker-smoke.sh`
-- Live e2e against real Telegram: `scripts/e2e_test.sh`, `scripts/e2e_cli_test.sh`, `scripts/e2e_http_extras_test.sh` — require an authorized Telethon session at `data/sessions/expertizemeAssistant/session.session` and a Telegram folder `Clients` containing chat `Client chat test`. These scripts mutate the real test account; per the MVP plan they are mandatory, not skipped.
+- Docker smoke (build + `/health` poll + teardown): `bash scripts/docker-smoke.sh`
+- Live e2e against real Telegram: `bash scripts/e2e_test.sh`, `bash scripts/e2e_cli_test.sh`, `bash scripts/e2e_http_extras_test.sh` — require an authorized Telethon session at `data/sessions/expertizemeAssistant/session.session` and a Telegram folder `Clients` containing chat `Client chat test`. These scripts mutate the real test account; per the MVP plan they are mandatory, not skipped.
 
 The Telethon session is created **only** by `telegram-planfix-assistant auth` (interactive — prompts for phone, code, optional 2FA). There is no HTTP endpoint for login. Re-running `auth` for an authorized session prints the bound account and exits without re-prompting.
 

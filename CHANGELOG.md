@@ -30,6 +30,7 @@
 
 ### Documentation
 
+- Add CLAUDE.md with architecture and command reference
 - Enforce e2e tests
 - Mark Task 18 e2e checkboxes as not-automatable
 - Add creds, repeat e2e
