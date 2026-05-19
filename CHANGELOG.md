@@ -49,6 +49,7 @@
 
 ### Miscellaneous
 
+- Chmod 644 docs
 - Drop exec bit on scripts/*.sh
 - Add git-cliff changelog and GitHub Actions workflows
 - Initial commit with spec and ralphex plan

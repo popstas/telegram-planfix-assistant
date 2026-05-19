@@ -40,3 +40,7 @@ htmlcov/
 
 # Logs
 *.log
+
+skills-lock.json
+.claude/
+
