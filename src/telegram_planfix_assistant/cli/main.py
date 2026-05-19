@@ -1438,6 +1438,11 @@ def members_bulk_add(
         "--continue-on-error/--stop-on-error",
         help="Continue the batch after a single-item failure (default true).",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the request and report the plan without adding members.",
+    ),
     config_path: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -1458,6 +1463,8 @@ def members_bulk_add(
         BulkMemberAddRequest,
         BulkMemberItem,
         bulk_add_members,
+        normalize_user_ref,
+        protected_user_set,
     )
     from telegram_planfix_assistant.worker.queue import WorkerQueue
 
@@ -1498,6 +1505,113 @@ def members_bulk_add(
     else:
         resolved_folder_name = folder_name
         effective_folder_id = folder_id
+
+    if dry_run:
+        # Validate items shape (roles) up-front, same error path as live run.
+        try:
+            items_validated = tuple(
+                BulkMemberItem(user=str(it["user"]), role=str(it["role"]))
+                for it in raw_items
+            )
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+
+        protected = protected_user_set(config=config.telegram)
+        try:
+            normalized_inputs = [
+                (it, normalize_user_ref(it.user)) for it in items_validated
+            ]
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+
+        async def _resolve_add() -> int:
+            try:
+                _, folder_backend = await open_backends()
+                if chat_id is not None:
+                    return chat_id
+                resolved = await resolve_chat_in_folder(
+                    folder_backend,
+                    folder_name=resolved_folder_name or "",
+                    chat_name=chat_name or "",
+                    folder_id=effective_folder_id,
+                )
+                return resolved.chat_id
+            finally:
+                try:
+                    await manager.disconnect()
+                except Exception:
+                    pass
+
+        try:
+            resolved_chat_id = asyncio.run(_resolve_add())
+        except FolderError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except Exception as exc:
+            typer.echo(f"members bulk-add failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        items_out: list[dict[str, object]] = []
+        planned: list[str] = []
+        warnings: list[str] = []
+        seen_users: dict[str, int] = {}
+        for idx, (item, n) in enumerate(normalized_inputs):
+            is_protected = n.value in protected
+            is_duplicate = n.value in seen_users
+            items_out.append(
+                {
+                    "user": item.user,
+                    "role": item.role,
+                    "normalized_user": n.value,
+                    "user_kind": n.kind,
+                    "action": "would_promote" if item.role == "admin" else "would_add",
+                    "protected": is_protected,
+                    "duplicate_in_file": is_duplicate,
+                }
+            )
+            verb = (
+                f"would add+promote {n.value} in chat {resolved_chat_id}"
+                if item.role == "admin"
+                else f"would add {n.value} to chat {resolved_chat_id}"
+            )
+            planned.append(verb)
+            if is_duplicate:
+                warnings.append(
+                    f"row {idx + 1}: duplicate user {n.value} "
+                    f"(first at row {seen_users[n.value] + 1})"
+                )
+            if is_protected:
+                warnings.append(
+                    f"{n.value} is a protected/technical account; "
+                    "re-adding it has no effect on a real run"
+                )
+            seen_users.setdefault(n.value, idx)
+
+        resolved_payload: dict[str, object] = {
+            "telegram_chat_id": resolved_chat_id,
+            "items": items_out,
+            "items_count": len(items_out),
+            "continue_on_error": continue_on_error,
+            "operation_id": operation_id,
+        }
+        if chat_name is not None:
+            resolved_payload["chat_name"] = chat_name
+            resolved_payload["folder_name"] = resolved_folder_name
+        payload = {
+            "status": "dry_run",
+            "dry_run": True,
+            "command": "members.bulk_add",
+            "would": (
+                f"add {len(items_out)} user(s) to chat {resolved_chat_id}"
+            ),
+            "resolved": resolved_payload,
+            "planned_actions": planned,
+            "warnings": warnings,
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, default=str))
+        return
 
     queue = WorkerQueue(
         store,
@@ -1815,6 +1929,14 @@ def members_bulk_remove(
                 warnings.append(
                     f"{n.value} is a protected account; real run requires --force"
                 )
+        resolved_payload: dict[str, object] = {
+            "telegram_chat_id": resolved_chat_id,
+            "mode": mode,
+            "items": items_out,
+        }
+        if chat_name is not None:
+            resolved_payload["chat_name"] = chat_name
+            resolved_payload["folder_name"] = resolved_folder_name
         payload: dict[str, object] = {
             "status": "dry_run",
             "dry_run": True,
@@ -1822,11 +1944,7 @@ def members_bulk_remove(
             "would": (
                 f"remove {len(items_out)} user(s) from chat {resolved_chat_id} via {mode}"
             ),
-            "resolved": {
-                "telegram_chat_id": resolved_chat_id,
-                "mode": mode,
-                "items": items_out,
-            },
+            "resolved": resolved_payload,
             "planned_actions": planned,
             "warnings": warnings,
             "telegram_chat_id": resolved_chat_id,
@@ -1989,6 +2107,11 @@ def messages_send(
         "--operation-id",
         help="Idempotency anchor; reuse to replay the saved result instead of re-sending.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the request and report the plan without sending any message.",
+    ),
     config_path: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -2001,6 +2124,7 @@ def messages_send(
     from telegram_planfix_assistant.folders import (
         FolderError,
         resolve_chat_in_folder,
+        resolve_folder,
     )
     from telegram_planfix_assistant.messages import (
         MassSendRequest,
@@ -2008,7 +2132,9 @@ def messages_send(
         MessageSendNeedsReview,
         MessageSendPending,
         SendMessageRequest,
+        is_service_command,
         mass_send_message,
+        redact_message_text,
         send_message,
     )
     from telegram_planfix_assistant.topics import (
@@ -2049,6 +2175,219 @@ def messages_send(
     else:
         resolved_folder_name = folder_name
         effective_folder_id = folder_id
+
+    if dry_run:
+        if not text or not text.strip():
+            typer.echo("messages send requires non-empty --text", err=True)
+            raise typer.Exit(code=2)
+        if is_mass and not (topic_name or "").strip():
+            typer.echo(
+                "mass mode requires --topic-name (and --folder-name resolves the folder)",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+
+        service = is_service_command(text)
+        display_text = redact_message_text(text) if service else text
+
+        async def _resolve_send() -> dict[str, object]:
+            try:
+                topic_backend, folder_backend = await open_backends()
+                if is_mass:
+                    snapshot = await resolve_folder(
+                        folder_backend,
+                        folder_name=resolved_folder_name or "",
+                        folder_id=effective_folder_id,
+                    )
+                    chat_rows: list[dict[str, object]] = []
+                    planned_local: list[str] = []
+                    local_warnings: list[str] = []
+                    for chat in snapshot.chats:
+                        try:
+                            topics = list(
+                                await topic_backend.list_topics(chat_id=chat.chat_id)
+                            )
+                        except Exception as exc:
+                            chat_rows.append(
+                                {
+                                    "telegram_chat_id": chat.chat_id,
+                                    "chat_name": chat.title,
+                                    "topic_name": topic_name,
+                                    "telegram_topic_id": None,
+                                    "action": "would_skip",
+                                    "reason": f"list_topics_failed: {exc}",
+                                }
+                            )
+                            local_warnings.append(
+                                f"chat {chat.chat_id}: list_topics failed ({exc}); "
+                                "real run would mark this chat failed"
+                            )
+                            continue
+                        matches = [t for t in topics if t.title == topic_name]
+                        if len(matches) == 0:
+                            chat_rows.append(
+                                {
+                                    "telegram_chat_id": chat.chat_id,
+                                    "chat_name": chat.title,
+                                    "topic_name": topic_name,
+                                    "telegram_topic_id": None,
+                                    "action": "would_skip",
+                                    "reason": "topic_not_found",
+                                }
+                            )
+                            continue
+                        if len(matches) > 1:
+                            chat_rows.append(
+                                {
+                                    "telegram_chat_id": chat.chat_id,
+                                    "chat_name": chat.title,
+                                    "topic_name": topic_name,
+                                    "telegram_topic_id": None,
+                                    "action": "would_skip",
+                                    "reason": "topic_ambiguous",
+                                }
+                            )
+                            local_warnings.append(
+                                f"chat {chat.chat_id} ({chat.title!r}): "
+                                f"topic name {topic_name!r} matches "
+                                f"{len(matches)} topics; rename one to disambiguate"
+                            )
+                            continue
+                        match = matches[0]
+                        chat_rows.append(
+                            {
+                                "telegram_chat_id": chat.chat_id,
+                                "chat_name": chat.title,
+                                "topic_name": topic_name,
+                                "telegram_topic_id": match.topic_id,
+                                "action": "would_send",
+                                "reason": None,
+                            }
+                        )
+                        planned_local.append(
+                            f"would send to chat {chat.chat_id} ({chat.title!r}) "
+                            f"topic {match.topic_id} ({topic_name!r})"
+                        )
+                    return {
+                        "mode": "mass",
+                        "items": chat_rows,
+                        "planned": planned_local,
+                        "warnings": local_warnings,
+                        "folder_id": snapshot.folder_id,
+                    }
+                # Targeted send.
+                if chat_id is not None:
+                    rch_id = chat_id
+                    rch_name: str | None = None
+                else:
+                    resolved = await resolve_chat_in_folder(
+                        folder_backend,
+                        folder_name=resolved_folder_name or "",
+                        chat_name=chat_name or "",
+                        folder_id=effective_folder_id,
+                    )
+                    rch_id = resolved.chat_id
+                    rch_name = resolved.title
+
+                rtopic_id = topic_id
+                if rtopic_id is None and topic_name is not None:
+                    rtopic_id = await resolve_topic_id_by_name(
+                        backend=topic_backend,
+                        telegram_chat_id=rch_id,
+                        topic_name=topic_name,
+                    )
+                return {
+                    "mode": "targeted",
+                    "telegram_chat_id": rch_id,
+                    "chat_name": rch_name,
+                    "telegram_topic_id": rtopic_id,
+                }
+            finally:
+                try:
+                    await manager.disconnect()
+                except Exception:
+                    pass
+
+        try:
+            info = asyncio.run(_resolve_send())
+        except (AmbiguousTopicNameError, TopicNotFoundError) as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except FolderError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except Exception as exc:
+            typer.echo(f"messages send failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        if info["mode"] == "mass":
+            items_out = info["items"]
+            warnings = list(info["warnings"])
+            planned = list(info["planned"])
+            send_count = sum(
+                1 for it in items_out if it["action"] == "would_send"
+            )
+            skip_count = sum(
+                1 for it in items_out if it["action"] == "would_skip"
+            )
+            resolved_payload: dict[str, object] = {
+                "mode": "mass",
+                "folder_name": resolved_folder_name,
+                "folder_id": info["folder_id"],
+                "topic_name": topic_name,
+                "text": display_text,
+                "is_service_command": service,
+                "items": items_out,
+                "items_count": len(items_out),
+                "send_count": send_count,
+                "skip_count": skip_count,
+                "operation_id": operation_id,
+            }
+            payload = {
+                "status": "dry_run",
+                "dry_run": True,
+                "command": "messages.send",
+                "would": (
+                    f"send to {send_count} chat(s) in folder "
+                    f"{resolved_folder_name!r} (topic {topic_name!r}); "
+                    f"{skip_count} would be skipped"
+                ),
+                "resolved": resolved_payload,
+                "planned_actions": planned,
+                "warnings": warnings,
+            }
+        else:
+            rch_id = info["telegram_chat_id"]
+            rch_name = info.get("chat_name")
+            rtopic_id = info["telegram_topic_id"]
+            resolved_payload = {
+                "mode": "targeted",
+                "telegram_chat_id": rch_id,
+                "chat_name": rch_name,
+                "telegram_topic_id": rtopic_id,
+                "topic_name": topic_name,
+                "text": display_text,
+                "is_service_command": service,
+                "operation_id": operation_id,
+            }
+            if chat_name is not None:
+                resolved_payload["folder_name"] = resolved_folder_name
+            target = (
+                f"chat {rch_id} topic {rtopic_id}"
+                if rtopic_id is not None
+                else f"chat {rch_id}"
+            )
+            payload = {
+                "status": "dry_run",
+                "dry_run": True,
+                "command": "messages.send",
+                "would": f"send message to {target}",
+                "resolved": resolved_payload,
+                "planned_actions": [f"would send to {target}"],
+                "warnings": [],
+            }
+        typer.echo(json.dumps(payload, sort_keys=True, default=str))
+        return
 
     async def _run() -> dict[str, object]:
         try:
