@@ -1343,18 +1343,40 @@ def members_bulk_remove(
             raise typer.Exit(code=1) from exc
 
         items_out: list[dict[str, object]] = []
+        planned: list[str] = []
+        warnings: list[str] = []
         for raw, n in normalized_inputs:
+            is_protected = n.value in protected
             items_out.append(
                 {
                     "user": raw,
                     "normalized_user": n.value,
                     "user_kind": n.kind,
                     "action": "would_remove",
-                    "protected": n.value in protected,
+                    "protected": is_protected,
                 }
             )
+            planned.append(
+                f"would remove {n.value} from chat {resolved_chat_id} via {mode}"
+            )
+            if is_protected and not force:
+                warnings.append(
+                    f"{n.value} is a protected account; real run requires --force"
+                )
         payload: dict[str, object] = {
+            "status": "dry_run",
             "dry_run": True,
+            "command": "members.bulk_remove",
+            "would": (
+                f"remove {len(items_out)} user(s) from chat {resolved_chat_id} via {mode}"
+            ),
+            "resolved": {
+                "telegram_chat_id": resolved_chat_id,
+                "mode": mode,
+                "items": items_out,
+            },
+            "planned_actions": planned,
+            "warnings": warnings,
             "telegram_chat_id": resolved_chat_id,
             "mode": mode,
             "items": items_out,
