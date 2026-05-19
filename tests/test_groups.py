@@ -516,6 +516,33 @@ async def test_create_group_layout_failure_does_not_fail_create(
     assert "chat is not a forum" in warnings[0].getMessage()
 
 
+async def test_create_group_layout_flood_wait_promotes_to_needs_review(
+    minimal_config_yaml: str,
+    store: OperationStore,
+) -> None:
+    """FLOOD_WAIT from the post-create layout call must surface as needs_review,
+    not be silently dropped to a warning log. The chat is already live, but the
+    operator still needs to know Telegram is throttling this account.
+    """
+    from telegram_planfix_assistant.worker.queue import FloodWaitError
+
+    config = _config_with_layout(minimal_config_yaml, "tabs")
+    backend = FakeGroupBackend(
+        set_layout_error=FloodWaitError(seconds=42),
+    )
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=5, skip_reserve=True)
+
+    with pytest.raises(GroupCreateNeedsReview):
+        await create_group(
+            backend=backend,
+            folder_backend=folder_backend,
+            store=store,
+            config=config.telegram,
+            request=request,
+        )
+
+
 async def test_create_group_skip_folder_bypasses_folder_resolution(
     minimal_config_yaml: str, store: OperationStore
 ) -> None:

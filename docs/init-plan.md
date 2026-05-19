@@ -92,6 +92,7 @@ telegram:
   defaults:
     enable_topics: true
     create_invite_link: true
+    topics_layout: "list"   # "list" | "tabs" — применяется после groups create
 
 http:
   host: "0.0.0.0"

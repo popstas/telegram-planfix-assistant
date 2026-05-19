@@ -192,6 +192,21 @@ def test_http_get_layout_returns_list(minimal_config_yaml: str) -> None:
     assert resp.json() == {"chat_id": -200, "layout": "list"}
 
 
+def test_http_get_layout_returns_502_on_flood_wait(minimal_config_yaml: str) -> None:
+    from telegram_planfix_assistant.worker.queue import FloodWaitError
+
+    backend = FakeLayoutBackend(get_error=FloodWaitError(seconds=12))
+    client = _http_client(minimal_config_yaml, backend)
+    resp = client.get(
+        "/telegram/groups/layout",
+        params={"chat_id": -300},
+        headers={"Authorization": "Bearer secret_token"},
+    )
+    assert resp.status_code == 502, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error"] == "needs_review"
+
+
 # ---------------------------------------------------------------------------
 # Failure modes
 # ---------------------------------------------------------------------------

@@ -210,9 +210,15 @@ def build_router() -> APIRouter:
         chat_id: int = Query(...),
     ) -> dict[str, Any]:
         backend, _ = _backends_or_503(request)
-        layout = await get_topics_layout(
-            backend=backend, telegram_chat_id=chat_id
-        )
+        try:
+            layout = await get_topics_layout(
+                backend=backend, telegram_chat_id=chat_id
+            )
+        except FloodWaitError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"error": "needs_review", "message": str(exc)},
+            ) from exc
         return {"chat_id": chat_id, "layout": layout}
 
     return router

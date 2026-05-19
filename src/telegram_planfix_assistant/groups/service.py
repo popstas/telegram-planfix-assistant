@@ -268,6 +268,11 @@ async def _execute_create(
             await backend.set_topics_layout(
                 chat_id=chat_id, tabs=_layout_to_tabs(layout)
             )
+        except FloodWaitError:
+            # FLOOD_WAIT on a soft-preference call still means Telegram is
+            # throttling this account — let the caller promote it to
+            # needs_review like every other in-flight throttle.
+            raise
         except Exception as exc:
             # The chat is already created and the layout default is a soft
             # preference — don't fail the create. The operator can retry via

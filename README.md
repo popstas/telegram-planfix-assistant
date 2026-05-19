@@ -81,6 +81,18 @@ telegram:
 
 Leave it unset (or remove the line) to connect directly.
 
+Defaults applied to new supergroups live under `telegram.defaults`:
+
+```yaml
+telegram:
+  defaults:
+    enable_topics: true
+    create_invite_link: true
+    topics_layout: "list"   # "list" | "tabs" — applied after groups create
+```
+
+`topics_layout` controls how the forum opens after `groups create`: `"list"` shows topics as a vertical list (Telegram's default), `"tabs"` shows them as horizontal tabs. The CLI `groups set-layout --layout` flag and the `POST /telegram/groups/layout` body override the default per call.
+
 See `docs/plans/20260518-telegram-planfix-assistant-mvp.md` for the full configuration schema and feature scope.
 
 ## Docker
