@@ -105,13 +105,13 @@
 
 ### Task 2: Добавить `--dry-run` в команды создания и изменения групп/топиков
 
-- [ ] добавить `--dry-run` в `groups create` (проверка title, folder, admins, members, reserve accounts, возможность создать группу и invite link)
-- [ ] добавить `--dry-run` в `topics create` (chat, folder, topic name, optional `planfix_task_id`, первое сообщение)
-- [ ] добавить `--dry-run` в `topics bulk-create` (chat, folder, CSV/JSON, дубли по topic name / `planfix_task_id`)
-- [ ] добавить `--dry-run` в `topics close` (chat, folder, topic, текущее состояние topic)
-- [ ] убедиться, что dry-run не создаёт операций в очереди (или создаёт только dry-run-запись)
-- [ ] write tests for new dry-run flag in groups/topics commands
-- [ ] run project tests - must pass before next task
+- [x] добавить `--dry-run` в `groups create` (проверка title, folder, admins, members, reserve accounts, возможность создать группу и invite link)
+- [x] добавить `--dry-run` в `topics create` (chat, folder, topic name, optional `planfix_task_id`, первое сообщение)
+- [x] добавить `--dry-run` в `topics bulk-create` (chat, folder, CSV/JSON, дубли по topic name / `planfix_task_id`)
+- [x] добавить `--dry-run` в `topics close` (chat, folder, topic, текущее состояние topic)
+- [x] убедиться, что dry-run не создаёт операций в очереди (или создаёт только dry-run-запись)
+- [x] write tests for new dry-run flag in groups/topics commands
+- [x] run project tests - must pass before next task
 
 ### Task 3: Добавить `--dry-run` в команды членства и сообщений
 
