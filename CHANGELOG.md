@@ -5,6 +5,7 @@
 
 ### Features
 
+- Add CLAUDE.md rule to update SKILL.md and README on CLI/HTTP changes
 - Add CLI Commands section to README
 - skill: Document groups layout commands and add inventory guard
 - http: Add groups layout get/set endpoints

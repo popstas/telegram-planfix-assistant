@@ -163,11 +163,11 @@ Reference chats the user wants to verify against:
 
 ### Task 10: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented (config field, CLI set/get, HTTP set/get, groups-create integration, skill update, README commands list, CLAUDE.md rule)
-- [ ] verify edge cases: non-forum chat → error surfaced; `enable_topics=False` create → no layout call; dry-run prints intended change without backend call
-- [ ] run the full project test suite (`pytest`)
-- [ ] run the project linter (`ruff check src tests`) — all issues must be fixed
-- [ ] confirm test coverage of new modules meets the project standard (e.g. `pytest --cov` if configured)
+- [x] verify all requirements from Overview are implemented (config field, CLI set/get, HTTP set/get, groups-create integration, skill update, README commands list, CLAUDE.md rule)
+- [x] verify edge cases: non-forum chat → error surfaced; `enable_topics=False` create → no layout call; dry-run prints intended change without backend call
+- [x] run the full project test suite (`pytest`) — 488 passed
+- [x] run the project linter (`ruff check src tests`) — all issues must be fixed
+- [x] confirm test coverage of new modules meets the project standard (e.g. `pytest --cov` if configured) — coverage not configured in pyproject.toml; N/A
 
 ## Post-Completion
 
