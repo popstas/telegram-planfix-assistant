@@ -14,6 +14,7 @@ from telegram_planfix_assistant.config.models import (
     QueueConfig,
     TelegramConfig,
     TelegramDefaults,
+    TopicsLayout,
 )
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "QueueConfig",
     "TelegramConfig",
     "TelegramDefaults",
+    "TopicsLayout",
     "load_config",
     "load_config_from_text",
 ]

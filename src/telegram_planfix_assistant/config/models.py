@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+TopicsLayout = Literal["list", "tabs"]
 
 
 class DefaultChatFolderConfig(BaseModel):
@@ -17,6 +21,7 @@ class TelegramDefaults(BaseModel):
 
     enable_topics: bool = True
     create_invite_link: bool = True
+    topics_layout: TopicsLayout = "list"
 
 
 class TelegramConfig(BaseModel):

@@ -58,12 +58,48 @@ http:
     config = load_config_from_text(minimal)
     assert config.telegram.defaults.enable_topics is True
     assert config.telegram.defaults.create_invite_link is True
+    assert config.telegram.defaults.topics_layout == "list"
     assert config.telegram.reserve_admins == []
     assert config.telegram.reserve_members == []
     assert config.http.host == "0.0.0.0"
     assert config.http.port == 8085
     assert config.queue.max_parallel_telegram_ops == 1
     assert config.logging.level == "INFO"
+
+
+def test_topics_layout_tabs_parses() -> None:
+    src = """
+telegram:
+  api_id: 1
+  api_hash: "h"
+  session_path: /tmp/s
+  default_chat_folder:
+    folder_name: "X"
+  defaults:
+    topics_layout: tabs
+http:
+  bearer_token: "tok"
+"""
+    config = load_config_from_text(src)
+    assert config.telegram.defaults.topics_layout == "tabs"
+
+
+def test_topics_layout_invalid_value_rejected() -> None:
+    bad = """
+telegram:
+  api_id: 1
+  api_hash: "h"
+  session_path: /tmp/s
+  default_chat_folder:
+    folder_name: "X"
+  defaults:
+    topics_layout: grid
+http:
+  bearer_token: "tok"
+"""
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_text(bad)
+    assert "topics_layout" in str(excinfo.value)
 
 
 def test_missing_required_telegram_keys_raises_config_error() -> None:

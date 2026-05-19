@@ -82,12 +82,12 @@ Reference chats the user wants to verify against:
 
 ### Task 1: Add `topics_layout` to config schema
 
-- [ ] add `TopicsLayout = Literal["list", "tabs"]` in `src/telegram_planfix_assistant/config/models.py`
-- [ ] add `topics_layout: TopicsLayout = "list"` to `TelegramDefaults`
-- [ ] update any committed example config (search for sample `config.yml` under `docs/` or repo root) to mention the new field
-- [ ] write a unit test (in `tests/test_config_loader.py` or the existing config test file) asserting the default is `"list"` and that `"tabs"` parses correctly
-- [ ] write a unit test asserting an invalid value (e.g. `"grid"`) raises a Pydantic validation error
-- [ ] run `pytest` and `ruff check src tests` — must pass before Task 2
+- [x] add `TopicsLayout = Literal["list", "tabs"]` in `src/telegram_planfix_assistant/config/models.py`
+- [x] add `topics_layout: TopicsLayout = "list"` to `TelegramDefaults`
+- [x] update any committed example config (search for sample `config.yml` under `docs/` or repo root) to mention the new field
+- [x] write a unit test (in `tests/test_config_loader.py` or the existing config test file) asserting the default is `"list"` and that `"tabs"` parses correctly
+- [x] write a unit test asserting an invalid value (e.g. `"grid"`) raises a Pydantic validation error
+- [x] run `pytest` and `ruff check src tests` — must pass before Task 2
 
 ### Task 2: Extend backend protocol and Telethon adapter
 

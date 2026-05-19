@@ -31,6 +31,7 @@ telegram:
   defaults:
     enable_topics: true
     create_invite_link: true
+    topics_layout: list             # "list" (default) or "tabs"
 
 http:
   host: "127.0.0.1"
