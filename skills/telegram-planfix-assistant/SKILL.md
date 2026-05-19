@@ -55,11 +55,13 @@ telegram-planfix-assistant health
 
 Commands fall into three buckets:
 
-1. **Read-only** — `health`, `folders inspect`, `operations status`. Run them
-   immediately, no confirmation, no `--dry-run`.
-2. **State-changing, single object** — `groups create`, `topics create`,
-   `topics close`, `messages send` (single chat), `folders add-chat`,
-   `operations retry`. Always: prepare command → run with `--dry-run` →
+1. **Read-only** — `health`, `folders inspect`, `operations status`,
+   `groups get-layout`. Run them immediately, no confirmation, no
+   `--dry-run`.
+2. **State-changing, single object** — `groups create`, `groups set-layout`,
+   `topics create`, `topics close`, `messages send` (single chat),
+   `folders add-chat`, `operations retry`. Always: prepare command → run
+   with `--dry-run` →
    show the plan and dry-run output → wait for explicit human confirmation
    → run the same command without `--dry-run`.
 3. **State-changing, bulk or destructive** — `topics bulk-create`,
@@ -131,9 +133,9 @@ not skip steps, even if the request looks obvious.
    described above.
 7. For state-changing commands that support `--dry-run`, run with
    `--dry-run` first. The supported set is: `groups create`,
-   `topics create`, `topics bulk-create`, `topics close`,
-   `members bulk-add`, `members bulk-remove`, `messages send`,
-   `folders add-chat`, `operations retry`.
+   `groups set-layout`, `topics create`, `topics bulk-create`,
+   `topics close`, `members bulk-add`, `members bulk-remove`,
+   `messages send`, `folders add-chat`, `operations retry`.
 8. Present a short plan to the human: what was found (chat id, folder,
    matched users), the full command that would run, and the relevant parts
    of the dry-run output (`status = dry_run`, planned actions, validation
@@ -172,6 +174,8 @@ agent stops and asks for clarification — it does not invent a new path.
 | `auth` | `login` | The human asks to (re-)log in the technical Telegram account. The agent never runs this itself. | `telegram-planfix-assistant auth` |
 | `health` | `check` | Pre-flight before any change; or the human asks "is everything alive?". | `telegram-planfix-assistant health` |
 | `groups` | `create` | Create a new client supergroup (title or `planfix_task_id`), optionally with members/admins and folder placement. | `telegram-planfix-assistant groups create ...` |
+| `groups` | `set-layout` | Change the topics layout (list ↔ tabs) on an existing forum supergroup. | `telegram-planfix-assistant groups set-layout ...` |
+| `groups` | `get-layout` | Read the current topics layout (`list` or `tabs`) for a forum supergroup. | `telegram-planfix-assistant groups get-layout ...` |
 | `topics` | `create` | Add one forum topic to an existing supergroup. | `telegram-planfix-assistant topics create ...` |
 | `topics` | `bulk-create` | Add several topics to one chat from a CSV/JSON list. | `telegram-planfix-assistant topics bulk-create ...` |
 | `topics` | `close` | Close (but not delete) an existing topic. | `telegram-planfix-assistant topics close ...` |
@@ -234,6 +238,37 @@ messages the agent must surface verbatim instead of paraphrasing.
 - Typical errors: `group create requires planfix_task_id or non-empty
   title`, folder errors from `resolve_folder`, `GroupCreateFailed`,
   `GroupCreateNeedsReview`.
+
+#### `groups` / `set-layout`
+
+- Extract: `--chat-id` (numeric supergroup id) and `--layout` when the
+  human names one (`list` or `tabs`).
+- Required flags: `--chat-id`.
+- From config: `--layout` defaults to `telegram.defaults.topics_layout`
+  when the human does not name a target layout. The agent surfaces the
+  effective layout in the plan so the human can override it.
+- Temp file: no.
+- Automation: trigger on requests like «переключи топики чата X на
+  tabs/list» or «сделай в чате X вкладки/список». Always treat this as
+  a single-object state change. The operation is idempotent — replaying
+  the same layout completes immediately.
+- Confirmation: required after dry-run.
+- Typical errors: `invalid --layout 'grid': expected 'list' or 'tabs'`
+  (CLI exit code 2), `GroupLayoutSetNeedsReview` (FLOOD_WAIT — retry via
+  `operations retry`), `GroupLayoutSetFailed` (Telethon error captured
+  on the operation row, e.g. chat is not a forum, missing admin rights).
+
+#### `groups` / `get-layout`
+
+- Extract: `--chat-id`.
+- Required flags: `--chat-id`.
+- From config: none.
+- Temp file: no.
+- Automation: read-only, run immediately when the human asks «какой
+  layout у чата X» / «как сейчас отображаются топики в X». No `--dry-run`.
+- Confirmation: not required (read-only).
+- Typical errors: `groups get-layout failed: ...` (chat not found, chat
+  is not a forum, session not authorized) — surface verbatim and stop.
 
 #### `topics` / `create`
 
@@ -425,6 +460,47 @@ Request: «Создай группу для клиента Клиент / про
    planned members).
 6. Wait for «да» / «выполни». Re-run the same command without
    `--dry-run`.
+
+### `groups set-layout`
+
+Request: «Переключи топики чата -1003911170598 на tabs.»
+
+1. Resource/action: `groups` / `set-layout`.
+2. Extracted: `--chat-id -1003911170598`, `--layout tabs`. If the human
+   does not name a layout, fall back to
+   `telegram.defaults.topics_layout` and surface that choice in the plan.
+3. Run `telegram-planfix-assistant health` if not yet done.
+4. Dry-run:
+
+   ```bash
+   telegram-planfix-assistant groups set-layout \
+     --chat-id -1003911170598 \
+     --layout tabs \
+     --dry-run
+   ```
+
+5. Show resolved chat id, target layout, layout source
+   (`cli` vs `config`), and the single planned action
+   (`set topics layout to 'tabs' for chat -1003911170598`).
+6. Wait for «да» / «выполни», then re-run the same command without
+   `--dry-run`. On `needs_review` (FLOOD_WAIT) point the human at
+   `operations retry`; do not auto-retry.
+
+### `groups get-layout`
+
+Request: «Какой layout у чата -1003915612716?»
+
+1. Resource/action: `groups` / `get-layout`. No dry-run, no
+   confirmation.
+2. Run:
+
+   ```bash
+   telegram-planfix-assistant groups get-layout \
+     --chat-id -1003915612716
+   ```
+
+3. Return the single-word output (`list` or `tabs`) verbatim. If the
+   CLI exits non-zero, surface the message and stop.
 
 ### `topics create`
 

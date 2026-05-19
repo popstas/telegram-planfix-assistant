@@ -138,13 +138,13 @@ Reference chats the user wants to verify against:
 
 ### Task 7: Update SKILL.md and add inventory guard
 
-- [ ] add `groups set-layout` and `groups get-layout` rows to the resources/actions catalog in `skills/telegram-planfix-assistant/SKILL.md`
-- [ ] add a per-pair extraction-rules block: required flags (`--chat-id`, `--layout`), config fallback for `--layout`, confirmation policy (single-object state change → confirm by default), typical errors (chat not a forum, missing admin rights, FLOOD_WAIT → needs_review)
-- [ ] add a short Russian scenario covering "переключи топики чата X на tabs" and "какой layout у чата X"
-- [ ] sync the file to `~/.claude/skills/telegram-planfix-assistant/SKILL.md` (document the sync step as part of the rule added in Task 9)
-- [ ] add `tests/test_skill_inventory.py` that parses the SKILL.md catalog and asserts it lists every CLI command exported by `cli/main.py` (cheap structural guard against future drift)
-- [ ] write the inventory test to cover both directions: every CLI command appears in SKILL.md, and every SKILL.md command exists in the CLI (catches both omissions and stale entries)
-- [ ] run `pytest tests/test_skill_inventory.py` and full `pytest` — must pass before Task 8
+- [x] add `groups set-layout` and `groups get-layout` rows to the resources/actions catalog in `skills/telegram-planfix-assistant/SKILL.md`
+- [x] add a per-pair extraction-rules block: required flags (`--chat-id`, `--layout`), config fallback for `--layout`, confirmation policy (single-object state change → confirm by default), typical errors (chat not a forum, missing admin rights, FLOOD_WAIT → needs_review)
+- [x] add a short Russian scenario covering "переключи топики чата X на tabs" and "какой layout у чата X"
+- [x] sync the file to `~/.claude/skills/telegram-planfix-assistant/SKILL.md` (document the sync step as part of the rule added in Task 9)
+- [x] add `tests/test_skill_inventory.py` that parses the SKILL.md catalog and asserts it lists every CLI command exported by `cli/main.py` (cheap structural guard against future drift)
+- [x] write the inventory test to cover both directions: every CLI command appears in SKILL.md, and every SKILL.md command exists in the CLI (catches both omissions and stale entries)
+- [x] run `pytest tests/test_skill_inventory.py` and full `pytest` — must pass before Task 8
 
 ### Task 8: Add CLI Commands section to README
 
