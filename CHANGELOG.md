@@ -5,6 +5,7 @@
 
 ### Features
 
+- Add --dry-run to members bulk-add and messages send
 - Add --dry-run to groups create and topics create/bulk-create/close
 - Audit CLI dry-run state and define shared envelope contract
 - Run live e2e against real Telegram and harden production wiring (task 18)

@@ -124,12 +124,12 @@
 
 ### Task 4: Добавить `--dry-run` в команды folders и operations
 
-- [ ] добавить `--dry-run` в `folders add-chat` (folder, chat, текущее нахождение чата в folder)
-- [ ] добавить `--dry-run` в `operations retry` (operation id, текущий статус, можно ли повторять без риска дубля)
-- [ ] убедиться, что `auth`, `health`, `folders inspect`, `operations status` остались без `--dry-run` (они не меняют состояние)
-- [ ] синхронизировать сообщения об ошибках валидации между dry-run и реальным запуском, чтобы они были одинаковыми
-- [ ] write tests for folders/operations dry-run и для отсутствия флага у read-only команд
-- [ ] run project tests - must pass before next task
+- [x] добавить `--dry-run` в `folders add-chat` (folder, chat, текущее нахождение чата в folder)
+- [x] добавить `--dry-run` в `operations retry` (operation id, текущий статус, можно ли повторять без риска дубля)
+- [x] убедиться, что `auth`, `health`, `folders inspect`, `operations status` остались без `--dry-run` (они не меняют состояние)
+- [x] синхронизировать сообщения об ошибках валидации между dry-run и реальным запуском, чтобы они были одинаковыми
+- [x] write tests for folders/operations dry-run и для отсутствия флага у read-only команд
+- [x] run project tests - must pass before next task
 
 ### Task 5: Создать каркас `SKILL.md` и общие правила работы агента
 

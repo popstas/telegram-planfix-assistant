@@ -2601,6 +2601,11 @@ def folders_add_chat(
         "--folder-id",
         help="Optional folder id cross-check.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the request and report the plan without moving the chat.",
+    ),
     config_path: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -2614,6 +2619,7 @@ def folders_add_chat(
         FolderError,
         add_chat_to_folder,
         resolve_chat_in_folder,
+        resolve_folder,
     )
 
     if (chat_id is None) == (chat_name is None):
@@ -2627,6 +2633,86 @@ def folders_add_chat(
     )
     effective_fid = folder_id if folder_id is not None else default_fid
     _config, manager, open_backend = _build_folder_backend(cfg_path)
+
+    if dry_run:
+        async def _preview() -> dict[str, object]:
+            try:
+                backend = await open_backend()
+                snapshot = await resolve_folder(
+                    backend,
+                    folder_name=resolved_name,
+                    folder_id=effective_fid,
+                )
+                if chat_id is not None:
+                    chat = await backend.resolve_chat(chat_id)
+                else:
+                    chat = await resolve_chat_in_folder(
+                        backend,
+                        folder_name=resolved_name,
+                        chat_name=chat_name or "",
+                        folder_id=effective_fid,
+                    )
+                already = any(c.chat_id == chat.chat_id for c in snapshot.chats)
+                return {
+                    "folder_id": snapshot.folder_id,
+                    "folder_name": snapshot.folder_name,
+                    "chat_id": chat.chat_id,
+                    "chat_title": chat.title,
+                    "already_in_folder": already,
+                }
+            finally:
+                try:
+                    await manager.disconnect()
+                except Exception:
+                    pass
+
+        try:
+            preview = asyncio.run(_preview())
+        except FolderError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except Exception as exc:
+            typer.echo(f"folders add-chat failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        warnings: list[str] = []
+        if preview["already_in_folder"]:
+            warnings.append(
+                f"chat {preview['chat_id']} is already in folder "
+                f"{preview['folder_name']!r}; real run would be a no-op"
+            )
+            planned_actions: list[str] = [
+                f"no-op: chat {preview['chat_id']} already in folder "
+                f"{preview['folder_name']!r}"
+            ]
+        else:
+            planned_actions = [
+                f"add chat {preview['chat_id']} ({preview['chat_title']!r}) to "
+                f"folder {preview['folder_name']!r} (folder_id={preview['folder_id']})"
+            ]
+        resolved_payload: dict[str, object] = {
+            "folder_id": preview["folder_id"],
+            "folder_name": preview["folder_name"],
+            "chat_id": preview["chat_id"],
+            "chat_title": preview["chat_title"],
+            "already_in_folder": preview["already_in_folder"],
+        }
+        if chat_name is not None:
+            resolved_payload["chat_name"] = chat_name
+        payload = {
+            "status": "dry_run",
+            "dry_run": True,
+            "command": "folders.add_chat",
+            "would": (
+                f"add chat {preview['chat_id']} to folder "
+                f"{preview['folder_name']!r}"
+            ),
+            "resolved": resolved_payload,
+            "planned_actions": planned_actions,
+            "warnings": warnings,
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, default=str))
+        return
 
     async def _run() -> dict[str, object]:
         try:
@@ -2733,6 +2819,11 @@ def operations_retry(
         "--operation-id",
         help="ID of the operation to retry.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the retry and report the plan without resetting state.",
+    ),
     config_path: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -2758,6 +2849,66 @@ def operations_retry(
             f"operation {operation_id} is completed; nothing to retry", err=True
         )
         raise typer.Exit(code=2)
+
+    if dry_run:
+        items = store.list_items(operation_id)
+        eligible = [
+            it
+            for it in items
+            if it.status in (OperationStatus.FAILED, OperationStatus.NEEDS_REVIEW)
+        ]
+        would_reset_operation = op.status is not OperationStatus.PENDING
+        item_summary = [
+            {
+                "id": it.id,
+                "idempotency_key": it.idempotency_key,
+                "status": it.status.value,
+                "error": it.error,
+            }
+            for it in eligible
+        ]
+        warnings: list[str] = []
+        if op.status is OperationStatus.PENDING and not eligible:
+            warnings.append(
+                f"operation {operation_id} is already pending and has no "
+                "failed/needs_review items; retry would be a no-op"
+            )
+        planned_actions: list[str] = []
+        if would_reset_operation:
+            planned_actions.append(
+                f"reset operation {operation_id} from "
+                f"{op.status.value} to pending"
+            )
+        for it in eligible:
+            planned_actions.append(
+                f"reset item {it.id} (key={it.idempotency_key!r}, "
+                f"status={it.status.value}) to pending"
+            )
+        if not planned_actions:
+            planned_actions.append(
+                f"no-op: nothing to reset for operation {operation_id}"
+            )
+        payload = {
+            "status": "dry_run",
+            "dry_run": True,
+            "command": "operations.retry",
+            "would": (
+                f"reset operation {operation_id} (and "
+                f"{len(eligible)} item(s)) for retry"
+            ),
+            "resolved": {
+                "operation_id": operation_id,
+                "operation_status": op.status.value,
+                "operation_type": op.type,
+                "would_reset_operation": would_reset_operation,
+                "items_to_reset": item_summary,
+            },
+            "planned_actions": planned_actions,
+            "warnings": warnings,
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, default=str))
+        return
+
     reset_items = store.reset_items_for_retry(operation_id)
     if op.status is not OperationStatus.PENDING:
         store.reset_operation_for_retry(operation_id)
