@@ -69,14 +69,18 @@ class WorkerQueue:
         max_parallel: int = 1,
         flood_wait_safety_margin_seconds: float = 5.0,
         default_retry_delay_seconds: float = 30.0,
+        max_flood_wait_retries: int = 6,
         sleep: SleepFn | None = None,
     ) -> None:
         if max_parallel < 1:
             raise ValueError("max_parallel must be >= 1")
+        if max_flood_wait_retries < 1:
+            raise ValueError("max_flood_wait_retries must be >= 1")
         self._store = store
         self._semaphore = asyncio.Semaphore(max_parallel)
         self._fw_margin = float(flood_wait_safety_margin_seconds)
         self._retry_delay = float(default_retry_delay_seconds)
+        self._max_fw_retries = int(max_flood_wait_retries)
         self._sleep: SleepFn = sleep if sleep is not None else asyncio.sleep
 
     @property
@@ -92,21 +96,36 @@ class WorkerQueue:
 
         Returns the final OperationRecord. FLOOD_WAIT triggers a pause-and-retry;
         any other exception transitions the operation to `failed`. A
-        `NeedsReviewError` marks it `needs_review` (no auto-retry).
+        `NeedsReviewError` marks it `needs_review` (no auto-retry). After
+        ``max_flood_wait_retries`` consecutive FLOOD_WAIT pauses, the operation
+        is moved to `needs_review` so it does not pin the request forever.
         """
-        async with self._semaphore:
-            while True:
+        fw_attempts = 0
+        while True:
+            async with self._semaphore:
                 try:
                     result = await handler()
                 except FloodWaitError as fw:
-                    await self._sleep(max(fw.seconds, 0.0) + self._fw_margin)
-                    continue
+                    # Release the semaphore so other queued operations can
+                    # proceed while this one waits out the FLOOD_WAIT window.
+                    pause = max(fw.seconds, 0.0) + self._fw_margin
+                    fw_attempts += 1
+                    if fw_attempts >= self._max_fw_retries:
+                        return self._store.mark_needs_review(
+                            operation_id,
+                            (
+                                f"FLOOD_WAIT exceeded retry budget "
+                                f"({self._max_fw_retries} attempts, last "
+                                f"pause={fw.seconds:.0f}s)"
+                            ),
+                        )
                 except NeedsReviewError as exc:
                     return self._store.mark_needs_review(operation_id, str(exc))
                 except Exception as exc:
                     return self._store.fail_operation(operation_id, str(exc))
                 else:
                     return self._store.complete_operation(operation_id, result)
+            await self._sleep(pause)
 
     async def run_bulk(
         self,
@@ -153,19 +172,32 @@ class WorkerQueue:
         spec: BulkItemSpec,
         handler: ItemHandler,
     ) -> OperationItemRecord:
-        async with self._semaphore:
-            while True:
+        fw_attempts = 0
+        while True:
+            async with self._semaphore:
                 try:
                     result = await handler(spec)
                 except FloodWaitError as fw:
-                    await self._sleep(max(fw.seconds, 0.0) + self._fw_margin)
-                    continue
+                    # Release the semaphore so concurrent items can keep
+                    # progressing while this one sleeps off the FLOOD_WAIT.
+                    pause = max(fw.seconds, 0.0) + self._fw_margin
+                    fw_attempts += 1
+                    if fw_attempts >= self._max_fw_retries:
+                        return self._store.mark_item_needs_review(
+                            item_id,
+                            (
+                                f"FLOOD_WAIT exceeded retry budget "
+                                f"({self._max_fw_retries} attempts, last "
+                                f"pause={fw.seconds:.0f}s)"
+                            ),
+                        )
                 except NeedsReviewError as exc:
                     return self._store.mark_item_needs_review(item_id, str(exc))
                 except Exception as exc:
                     return self._store.fail_item(item_id, str(exc))
                 else:
                     return self._store.complete_item(item_id, result)
+            await self._sleep(pause)
 
     async def resume_bulk(
         self,

@@ -20,7 +20,7 @@ pip install -e ".[dev]"
 # Place a config file at data/config.yml (see Configuration below)
 telegram-planfix-assistant auth      # interactive Telethon login
 telegram-planfix-assistant health    # show current health
-uvicorn telegram_planfix_assistant.http.app:create_app --factory --port 8085
+uvicorn telegram_planfix_assistant.http_api.app:create_app --factory --port 8085
 ```
 
 ## Configuration

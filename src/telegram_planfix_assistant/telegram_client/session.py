@@ -74,14 +74,24 @@ class TelethonSessionManager:
         return self._config.main_account_label
 
     async def get_client(self) -> _TelethonLike:
-        """Return a connected client, creating one on first use."""
+        """Return a connected client, creating one on first use.
+
+        If ``connect()`` raises, the cached client is dropped so a later call
+        retries from scratch (and so HTTP backend factories that gate on
+        ``_client is None`` correctly observe the disconnected state instead
+        of handing out a client that never finished connecting).
+        """
         if self._client is None:
             self._client = self._factory(
                 self._config.session_path,
                 self._config.api_id,
                 self._config.api_hash,
             )
-        await self._client.connect()
+        try:
+            await self._client.connect()
+        except Exception:
+            self._client = None
+            raise
         return self._client
 
     async def disconnect(self) -> None:

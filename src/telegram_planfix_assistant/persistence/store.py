@@ -14,12 +14,13 @@ HTTP layer so policy stays out of storage.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import threading
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -78,8 +79,18 @@ class OperationStore:
     # connection helpers
     # ------------------------------------------------------------------
 
-    def _connect(self) -> sqlite3.Connection:
-        return connect(self._database_path)
+    @contextlib.contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        # sqlite3.Connection.__exit__ commits/rolls back but does not close the
+        # connection, so naive `with sqlite3.connect(...) as conn:` leaks the
+        # underlying file descriptor until the GC finalises it. We manage the
+        # transaction explicitly elsewhere and only need to ensure the
+        # connection is closed when the caller exits the block.
+        conn = connect(self._database_path)
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     # ------------------------------------------------------------------
     # row -> record mapping

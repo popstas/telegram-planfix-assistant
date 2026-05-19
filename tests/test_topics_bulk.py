@@ -263,10 +263,9 @@ async def test_bulk_create_continue_on_error_keeps_running(
     assert result.failed == 1
     assert op.status is OperationStatus.NEEDS_REVIEW
     # Backend got both successful create calls — Beta failed.
-    assert ("-100".replace("-", "-")  # silence E501-free; checked below
-            or True)
     assert (-100, "Alpha") in backend.created
     assert (-100, "Gamma") in backend.created
+    assert (-100, "Beta") not in backend.created
 
 
 async def test_bulk_create_stop_on_error_short_circuits(
@@ -337,6 +336,52 @@ async def test_bulk_create_flood_wait_pauses_and_retries(
     # The flood-wait + margin (3 + 2) shows up once for the retried call.
     assert sleeps == [5.0]
     assert result.created == 2
+    assert op.status is OperationStatus.COMPLETED
+
+
+async def test_bulk_create_first_message_flood_wait_propagates(
+    store: OperationStore,
+) -> None:
+    """A FLOOD_WAIT raised by send_message during first-message must propagate
+    to the queue so the item can pause-and-retry, not get swallowed into a
+    successful-looking topic without its first message."""
+
+    class FloodyFirstMessageBackend:
+        def __init__(self) -> None:
+            self.create_calls = 0
+            self.send_calls = 0
+
+        async def create_topic(self, *, chat_id: int, name: str) -> int:
+            self.create_calls += 1
+            return 1000 + self.create_calls
+
+        async def send_message(
+            self, *, chat_id: int, text: str, topic_id: int | None = None
+        ) -> int:
+            self.send_calls += 1
+            if self.send_calls == 1:
+                raise FloodWaitError(4.0)
+            return 7777
+
+    sleeps: list[float] = []
+    queue = _make_queue(store, sleeps=sleeps)
+    backend = FloodyFirstMessageBackend()
+    req = BulkTopicCreateRequest(
+        telegram_chat_id=-100,
+        items=(BulkTopicItem(topic_name="Alpha", planfix_task_id=1),),
+        operation_id="op-fw-first-msg",
+    )
+    result, op = await bulk_create_topics(
+        backend=backend, store=store, queue=queue, request=req
+    )
+    # The flood_wait + margin (4 + 2) shows up exactly once: the queue paused
+    # the whole item and retried it cleanly, including the create_topic step.
+    assert sleeps == [6.0]
+    # create_topic ran twice (the queue retries the whole handler from scratch),
+    # send_message ran twice too (first raised, second succeeded).
+    assert backend.create_calls == 2
+    assert backend.send_calls == 2
+    assert result.created == 1
     assert op.status is OperationStatus.COMPLETED
 
 

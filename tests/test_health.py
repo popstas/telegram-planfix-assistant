@@ -36,12 +36,48 @@ class _FakeMe:
     username: str = "tech"
 
 
+class _FakeFolder:
+    def __init__(self, *, folder_id: int, title: str) -> None:
+        self.id = folder_id
+        self.title = title
+        self.include_peers: list[Any] = []
+        self.pinned_peers: list[Any] = []
+
+
+class _FakeFilters:
+    def __init__(self, filters: list[Any]) -> None:
+        self.filters = filters
+
+
+class _FakeFolderClient:
+    """Telethon client double serving GetDialogFiltersRequest only."""
+
+    def __init__(self, folders: list[_FakeFolder]) -> None:
+        self._folders = folders
+
+    async def __call__(self, _request: Any) -> Any:
+        return _FakeFilters(list(self._folders))
+
+
 class _FakeManager:
     """Mimics the slice of TelethonSessionManager that health probes touch."""
 
-    def __init__(self, *, authorized: bool, raise_on_state: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        authorized: bool,
+        raise_on_state: bool = False,
+        folders: list[_FakeFolder] | None = None,
+    ) -> None:
         self._authorized = authorized
         self._raise = raise_on_state
+        # Default to one folder matching ``minimal_config_yaml`` so the real
+        # folder probe succeeds without per-test wiring.
+        self._folders = (
+            folders
+            if folders is not None
+            else [_FakeFolder(folder_id=2, title="Planfix clients")]
+        )
 
     async def state(self) -> Any:
         if self._raise:
@@ -54,6 +90,9 @@ class _FakeManager:
             session_path="/tmp/test.session",
             me=_FakeMe() if self._authorized else None,
         )
+
+    async def get_client(self) -> Any:
+        return _FakeFolderClient(self._folders)
 
 
 # ---------------------------------------------------------------------------

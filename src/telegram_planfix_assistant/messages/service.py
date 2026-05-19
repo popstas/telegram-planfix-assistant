@@ -35,6 +35,7 @@ from telegram_planfix_assistant.persistence.models import (
 )
 from telegram_planfix_assistant.persistence.store import OperationStore
 from telegram_planfix_assistant.topics import TopicBackend, TopicSummary
+from telegram_planfix_assistant.worker.queue import FloodWaitError
 
 
 class MessageSendFailed(RuntimeError):
@@ -223,6 +224,15 @@ async def send_message(
             text=request.text,
             topic_id=request.telegram_topic_id,
         )
+    except FloodWaitError as exc:
+        # FLOOD_WAIT is transient — marking the op `failed` would lock the
+        # idempotency key on a terminal state and the retry would surface
+        # MessageSendFailed forever. Mark needs_review so an operator can
+        # `operations retry` to reopen the slot.
+        store.mark_needs_review(
+            operation_id, f"FLOOD_WAIT during message send: {exc}"
+        )
+        raise MessageSendNeedsReview(str(exc)) from exc
     except Exception as exc:
         store.fail_operation(operation_id, str(exc))
         raise
@@ -331,11 +341,11 @@ async def _match_topic(
 
     Multiple matches are treated as no match — the operator can't tell which
     one to use, so we surface that as ``skipped`` with a clear reason.
+    ``FloodWaitError`` is re-raised so the caller can mark the chat as
+    ``failed`` rather than silently misreporting a throttle as
+    ``topic_not_found``.
     """
-    try:
-        topics = await topic_backend.list_topics(chat_id=telegram_chat_id)
-    except Exception:
-        return None
+    topics = await topic_backend.list_topics(chat_id=telegram_chat_id)
     matches = [t for t in topics if t.title == topic_name]
     if len(matches) != 1:
         return None
@@ -375,11 +385,41 @@ async def mass_send_message(
     service = is_service_command(request.text)
 
     for chat in snapshot.chats:
-        match = await _match_topic(
-            topic_backend=topic_backend,
-            telegram_chat_id=chat.chat_id,
-            topic_name=request.topic_name,
-        )
+        try:
+            match = await _match_topic(
+                topic_backend=topic_backend,
+                telegram_chat_id=chat.chat_id,
+                topic_name=request.topic_name,
+            )
+        except FloodWaitError as exc:
+            # A throttle on list_topics must not be reported as
+            # ``topic_not_found`` — the caller would treat a transient pause
+            # as a permanent skip and leave the chat unmessaged.
+            failed += 1
+            items.append(
+                MassSendItemResult(
+                    status="failed",
+                    telegram_chat_id=chat.chat_id,
+                    chat_name=chat.title,
+                    topic_name=request.topic_name,
+                    error=f"list_topics FLOOD_WAIT: {exc}",
+                    reason="list_topics_flood_wait",
+                )
+            )
+            continue
+        except Exception as exc:
+            failed += 1
+            items.append(
+                MassSendItemResult(
+                    status="failed",
+                    telegram_chat_id=chat.chat_id,
+                    chat_name=chat.title,
+                    topic_name=request.topic_name,
+                    error=f"list_topics failed: {exc}",
+                    reason="list_topics_failed",
+                )
+            )
+            continue
         if match is None:
             skipped += 1
             items.append(

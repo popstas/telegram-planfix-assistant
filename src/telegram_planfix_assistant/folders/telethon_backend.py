@@ -16,6 +16,7 @@ from telegram_planfix_assistant.folders.service import (
     FolderNotFoundError,
     FolderSnapshot,
 )
+from telegram_planfix_assistant.telegram_client.errors import translate_flood_wait
 
 
 def _normalise_title(value: Any) -> str:
@@ -47,7 +48,10 @@ class TelethonFolderBackend:
     async def _fetch_filters(self) -> list[Any]:
         from telethon.tl.functions.messages import GetDialogFiltersRequest
 
-        result = await self._client(GetDialogFiltersRequest())
+        try:
+            result = await self._client(GetDialogFiltersRequest())
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
         filters = getattr(result, "filters", result)
         return list(filters)
 
@@ -85,7 +89,10 @@ class TelethonFolderBackend:
         return snapshots
 
     async def resolve_chat(self, chat_ref: str | int) -> FolderChat:
-        entity = await self._client.get_entity(chat_ref)
+        try:
+            entity = await self._client.get_entity(chat_ref)
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
         chat_id = getattr(entity, "id", None)
         if chat_id is None:
             raise ValueError(f"resolved entity for {chat_ref!r} has no id")
@@ -105,11 +112,17 @@ class TelethonFolderBackend:
             raise FolderNotFoundError(
                 f"folder id {folder_id} no longer exists in Telegram folder list"
             )
-        input_peer = await self._client.get_input_entity(chat_id)
+        try:
+            input_peer = await self._client.get_input_entity(chat_id)
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
         include_peers = list(getattr(target, "include_peers", []) or [])
         if input_peer not in include_peers:
             include_peers.append(input_peer)
             target.include_peers = include_peers
-        await self._client(
-            UpdateDialogFilterRequest(id=folder_id, filter=target)
-        )
+        try:
+            await self._client(
+                UpdateDialogFilterRequest(id=folder_id, filter=target)
+            )
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc

@@ -20,6 +20,7 @@ from telegram_planfix_assistant.http_api import create_app
 from telegram_planfix_assistant.messages import (
     MassSendRequest,
     MessageSendFailed,
+    MessageSendNeedsReview,
     SendMessageRequest,
     is_service_command,
     mass_send_message,
@@ -31,6 +32,7 @@ from telegram_planfix_assistant.persistence import (
     OperationStore,
 )
 from telegram_planfix_assistant.topics import TopicSummary
+from telegram_planfix_assistant.worker.queue import FloodWaitError
 
 
 class FakeMessageBackend:
@@ -188,6 +190,32 @@ async def test_send_message_failure_marks_failed(store: OperationStore) -> None:
         )
 
 
+async def test_send_message_flood_wait_marks_needs_review_not_failed(
+    store: OperationStore,
+) -> None:
+    """FLOOD_WAIT on a single-shot send must be retryable. Marking the row
+    ``failed`` would burn the idempotency key on a transient signal — every
+    subsequent replay would surface ``MessageSendFailed`` forever.
+    """
+
+    class FloodingBackend:
+        async def send_message(
+            self, *, chat_id: int, text: str, topic_id: int | None = None
+        ) -> int:
+            raise FloodWaitError(5.0)
+
+    req = SendMessageRequest(
+        telegram_chat_id=-100, text="hi", operation_id="op-fw"
+    )
+    with pytest.raises(MessageSendNeedsReview):
+        await send_message(backend=FloodingBackend(), store=store, request=req)
+
+    # Replay must NOT raise MessageSendFailed — the row is needs_review, not
+    # terminal-failed.
+    with pytest.raises(MessageSendNeedsReview):
+        await send_message(backend=FloodingBackend(), store=store, request=req)
+
+
 async def test_send_message_service_command_marks_flag(
     store: OperationStore,
 ) -> None:
@@ -268,6 +296,46 @@ async def test_mass_send_targets_only_chats_with_topic(
 
     # Sent twice — once per matching chat.
     assert len(msg_backend.sent) == 2
+
+
+async def test_mass_send_flood_wait_on_list_topics_reports_failed(
+    store: OperationStore,
+) -> None:
+    """A FLOOD_WAIT raised by ``list_topics`` must NOT be silently turned into
+    ``topic_not_found``. The chat should be reported as ``failed`` with a
+    distinct reason so the operator knows to retry, rather than concluding the
+    topic was permanently missing.
+    """
+
+    class FloodingTopicBackend:
+        async def list_topics(self, *, chat_id: int) -> list[TopicSummary]:
+            raise FloodWaitError(7.0)
+
+    folder = FolderSnapshot(
+        folder_id=1,
+        folder_name="F",
+        chats=[FolderChat(chat_id=-100, title="Acme")],
+    )
+    folder_backend = FakeFolderBackend([folder])
+    msg_backend = FakeMessageBackend()
+
+    req = MassSendRequest(
+        folder_name="F", topic_name="Daily", text="hi", operation_id="mfw"
+    )
+    result = await mass_send_message(
+        message_backend=msg_backend,
+        topic_backend=FloodingTopicBackend(),
+        folder_backend=folder_backend,
+        store=store,
+        request=req,
+    )
+    assert result.failed == 1
+    assert result.skipped == 0
+    assert result.sent == 0
+    item = result.items[0]
+    assert item.status == "failed"
+    assert item.reason == "list_topics_flood_wait"
+    assert item.error is not None and "FLOOD_WAIT" in item.error
 
 
 async def test_mass_send_skips_ambiguous_topic_name(

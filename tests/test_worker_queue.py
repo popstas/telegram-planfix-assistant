@@ -38,6 +38,7 @@ def _make_queue(
     max_parallel: int = 1,
     flood_margin: float = 0.0,
     sleeps: list[float] | None = None,
+    max_flood_wait_retries: int = 6,
 ) -> WorkerQueue:
     """Build a queue with a recording, no-real-sleep sleep function."""
     record = sleeps if sleeps is not None else []
@@ -49,6 +50,7 @@ def _make_queue(
         store,
         max_parallel=max_parallel,
         flood_wait_safety_margin_seconds=flood_margin,
+        max_flood_wait_retries=max_flood_wait_retries,
         sleep=fake_sleep,
     )
 
@@ -104,6 +106,27 @@ async def test_run_operation_needs_review_does_not_auto_retry(
     assert record.status is OperationStatus.NEEDS_REVIEW
     assert record.error == "undefined outcome"
     assert calls == 1
+
+
+async def test_run_operation_flood_wait_retries_are_bounded(
+    store: OperationStore,
+) -> None:
+    op = store.begin_operation(
+        operation_type="x", idempotency_key="k-fw-bound", request_payload={}
+    )
+    queue = _make_queue(store, flood_margin=0.0, max_flood_wait_retries=3)
+
+    calls = 0
+
+    async def handler() -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        raise FloodWaitError(2.0)
+
+    record = await queue.run_operation(op.operation.id, handler)
+    assert record.status is OperationStatus.NEEDS_REVIEW
+    assert calls == 3
+    assert "FLOOD_WAIT exceeded retry budget" in (record.error or "")
 
 
 async def test_run_operation_pauses_on_flood_wait_then_succeeds(
@@ -300,7 +323,9 @@ async def test_max_parallel_bounds_concurrent_handlers(store: OperationStore) ->
         )
 
     await asyncio.gather(*(run_one(pid) for pid in parents))
-    assert peak <= 2
+    # Lower bound checks the semaphore actually permits parallelism (otherwise
+    # a regression that collapsed it to 1 would silently pass this test).
+    assert peak == 2
 
 
 # ---------------------------------------------------------------------------

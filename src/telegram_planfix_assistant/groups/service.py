@@ -29,6 +29,7 @@ from telegram_planfix_assistant.persistence.models import (
     OperationStatus,
 )
 from telegram_planfix_assistant.persistence.store import OperationStore
+from telegram_planfix_assistant.worker.queue import FloodWaitError
 
 PLANFIX_BOT_USERNAME = "@planfix_bot"
 
@@ -247,6 +248,12 @@ async def _execute_create(
     for user in all_members:
         try:
             await backend.add_member(chat_id=chat_id, user=user)
+        except FloodWaitError:
+            # FLOOD_WAIT during population must surface as needs_review (via
+            # the caller's broad handler), not get silently dropped into
+            # `skipped`. Recording it as "skipped" hides a transient throttle
+            # behind a successful-looking response.
+            raise
         except Exception as exc:
             skipped.append(
                 {"step": "add_member", "user": user, "reason": str(exc)}
@@ -265,6 +272,8 @@ async def _execute_create(
             continue
         try:
             await backend.promote_admin(chat_id=chat_id, user=admin)
+        except FloodWaitError:
+            raise
         except Exception as exc:
             skipped.append(
                 {"step": "promote_admin", "user": admin, "reason": str(exc)}
@@ -276,6 +285,8 @@ async def _execute_create(
     if create_link:
         try:
             invite_link = await backend.create_invite_link(chat_id=chat_id)
+        except FloodWaitError:
+            raise
         except Exception as exc:
             skipped.append(
                 {"step": "create_invite_link", "reason": str(exc)}
@@ -415,6 +426,13 @@ async def create_group(
         )
     except FolderPeerFailureError as exc:
         op = store.mark_needs_review(operation_id, str(exc))
+        raise GroupCreateNeedsReview(str(exc)) from exc
+    except FloodWaitError as exc:
+        # The supergroup is already live on Telegram by the time member
+        # population hits FLOOD_WAIT. Marking the operation `failed` would
+        # leave a half-populated chat with no clear path forward; promote it
+        # to `needs_review` so the operator can finish placement by hand.
+        op = store.mark_needs_review(operation_id, f"FLOOD_WAIT during group population: {exc}")
         raise GroupCreateNeedsReview(str(exc)) from exc
     except GroupError:
         raise

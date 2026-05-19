@@ -21,6 +21,7 @@ from telegram_planfix_assistant.http_api.messages import build_router as build_m
 from telegram_planfix_assistant.http_api.topics import build_router as build_topics_router
 from telegram_planfix_assistant.members import MemberAddBackend, MemberRemoveBackend
 from telegram_planfix_assistant.messages import MessageBackend
+from telegram_planfix_assistant.observability.logging import configure_logging
 from telegram_planfix_assistant.persistence.store import OperationStore
 from telegram_planfix_assistant.telegram_client.session import (
     TelethonSessionManager,
@@ -198,6 +199,11 @@ def create_app(
     """
     if config is None:
         config = load_config()
+
+    # Honor the operator-configured log level for both stdlib and structlog
+    # output. Without this the first `get_logger()` call would auto-configure
+    # at INFO regardless of what `data/config.yml` requested.
+    configure_logging(level=config.logging.level, force=True)
 
     # Auto-construct a Telethon session manager from config when the caller did
     # not supply one. This is the production path: `uvicorn ... --factory`

@@ -449,8 +449,18 @@ async def bulk_add_members(
 
         promoted = False
         if role == "admin":
-            await backend.promote_admin(chat_id=chat_id, user=user_ref)
-            promoted = True
+            try:
+                await backend.promote_admin(chat_id=chat_id, user=user_ref)
+                promoted = True
+            except Exception as exc:
+                # The user IS a member at this point; only admin promotion
+                # failed. Re-raise with context so the per-item failure record
+                # accurately reflects that the add succeeded but the promote
+                # didn't (retry will hit MemberAlreadyPresentError on the add
+                # and re-attempt the promote).
+                raise RuntimeError(
+                    f"user added but admin promotion failed: {exc}"
+                ) from exc
 
         return {
             "status": "already_member" if already_member else "added",
@@ -891,6 +901,16 @@ async def bulk_remove_members(
                 # is the desired terminal state for ban_unban. Treat the unban
                 # as a no-op rather than a failure.
                 pass
+            except Exception as exc:
+                # Ban already happened. Surface the unban failure with context
+                # so the per-item failure record shows the user is on the chat
+                # blacklist and needs operator follow-up. Retry will re-attempt
+                # ban (likely MemberNotPresentError → short-circuit, leaving
+                # the unban undone), so flagging it explicitly here is the
+                # honest signal.
+                raise RuntimeError(
+                    f"user banned but unban failed: {exc}"
+                ) from exc
 
         return {
             "status": "removed",

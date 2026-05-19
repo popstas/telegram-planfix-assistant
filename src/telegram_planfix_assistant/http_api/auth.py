@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import secrets
+
 from fastapi import Depends, Header, HTTPException, Request, status
 
 
@@ -33,7 +35,7 @@ async def require_bearer_token(
             detail="Authorization header must be 'Bearer <token>'",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if token != expected:
+    if not secrets.compare_digest(token, expected):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid bearer token",

@@ -23,9 +23,11 @@ from telegram_planfix_assistant.persistence import (
 )
 from telegram_planfix_assistant.topics import (
     TopicCreateFailed,
+    TopicCreateNeedsReview,
     TopicCreateRequest,
     create_topic,
 )
+from telegram_planfix_assistant.worker.queue import FloodWaitError
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -241,6 +243,40 @@ async def test_create_topic_first_message_failure_is_non_fatal(
     assert result.first_message_kind == "task"
     assert result.first_message_text == "/task 33"
     assert result.telegram_message_id is None
+
+
+async def test_create_topic_flood_wait_marks_needs_review_not_failed(
+    store: OperationStore,
+) -> None:
+    """FLOOD_WAIT on the single-shot create_topic must NOT burn the
+    idempotency key on a terminal ``failed`` state. The op is transient and
+    must be retryable once the FLOOD_WAIT window expires; marking it
+    ``needs_review`` keeps the row recoverable via ``operations retry``.
+    """
+
+    class FloodingBackend:
+        async def create_topic(self, *, chat_id: int, name: str) -> int:
+            raise FloodWaitError(7.0)
+
+        async def send_message(
+            self, *, chat_id: int, text: str, topic_id: int | None = None
+        ) -> int:
+            raise AssertionError("send_message should not run after FLOOD_WAIT")
+
+    backend = FloodingBackend()
+    request = TopicCreateRequest(
+        telegram_chat_id=-100,
+        topic_name="FloodWaiting",
+        planfix_task_id=77,
+    )
+
+    with pytest.raises(TopicCreateNeedsReview):
+        await create_topic(backend=backend, store=store, request=request)
+
+    # Replay must NOT raise TopicCreateFailed — that would mean the op was
+    # locked into a terminal failure on a transient signal.
+    with pytest.raises(TopicCreateNeedsReview):
+        await create_topic(backend=backend, store=store, request=request)
 
 
 async def test_create_topic_rejects_empty_name(store: OperationStore) -> None:
