@@ -53,6 +53,10 @@ Operation states are `pending | completed | failed | needs_review`. `needs_revie
 
 `data/config.yml` is loaded by `config.loader.load_config()`. Schema (Pydantic) is in `config/models.py`. Notable: `telegram.default_chat_folder.folder_name` is the default for CLI `--folder-name` and for placing newly created groups; chat folders are never auto-created — if the configured folder is missing, the service returns an error.
 
+## Updating CLI/HTTP
+
+When you add or change a CLI command or HTTP endpoint, update `skills/telegram-planfix-assistant/SKILL.md` and re-sync it to `~/.claude/skills/telegram-planfix-assistant/SKILL.md` in the same change. Update the Commands section in `README.md` too. The `tests/test_skill_inventory.py` guard will fail otherwise.
+
 ## Tests
 
 - `tests/conftest.py` exposes a `minimal_config_yaml` fixture used widely.

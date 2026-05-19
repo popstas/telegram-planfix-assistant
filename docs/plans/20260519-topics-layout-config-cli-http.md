@@ -156,10 +156,10 @@ Reference chats the user wants to verify against:
 
 ### Task 9: Update CLAUDE.md with the "always update the skill" rule
 
-- [ ] add a new section (between `## Config` and `## Common commands`) titled `## Updating CLI/HTTP` stating: "When you add or change a CLI command or HTTP endpoint, update `skills/telegram-planfix-assistant/SKILL.md` and re-sync it to `~/.claude/skills/telegram-planfix-assistant/SKILL.md` in the same change. Update the Commands section in `README.md` too. The `tests/test_skill_inventory.py` guard will fail otherwise."
-- [ ] sanity-check the rule wording reads cleanly in the existing CLAUDE.md flow
-- [ ] no automated test; verify by reading the rendered file
-- [ ] run `pytest` and `ruff check src tests` — must pass before Task 10
+- [x] add a new section (between `## Config` and `## Common commands`) titled `## Updating CLI/HTTP` stating: "When you add or change a CLI command or HTTP endpoint, update `skills/telegram-planfix-assistant/SKILL.md` and re-sync it to `~/.claude/skills/telegram-planfix-assistant/SKILL.md` in the same change. Update the Commands section in `README.md` too. The `tests/test_skill_inventory.py` guard will fail otherwise."
+- [x] sanity-check the rule wording reads cleanly in the existing CLAUDE.md flow
+- [x] no automated test; verify by reading the rendered file
+- [x] run `pytest` and `ruff check src tests` — must pass before Task 10
 
 ### Task 10: Verify acceptance criteria
 
