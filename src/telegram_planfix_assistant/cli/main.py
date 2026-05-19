@@ -492,6 +492,153 @@ def groups_create(
     typer.echo(json.dumps(payload, sort_keys=True, default=str))
 
 
+@groups_app.command("set-layout")
+def groups_set_layout(
+    chat_id: int = typer.Option(
+        ...,
+        "--chat-id",
+        help="Numeric Telegram chat id of the forum supergroup.",
+    ),
+    layout: str | None = typer.Option(
+        None,
+        "--layout",
+        help="Topics layout: 'list' or 'tabs' "
+        "(defaults to telegram.defaults.topics_layout).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the request and report the plan without changing the layout.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Set the topics layout (list vs tabs) for an existing forum chat."""
+    from telegram_planfix_assistant.groups import (
+        GroupLayoutSetFailed,
+        GroupLayoutSetNeedsReview,
+        GroupLayoutSetPending,
+        LayoutSetRequest,
+        set_topics_layout,
+    )
+
+    config, manager, store, open_backends = _build_group_backends(config_path)
+
+    effective_layout = (
+        layout if layout is not None else config.telegram.defaults.topics_layout
+    )
+    if effective_layout not in ("list", "tabs"):
+        typer.echo(
+            f"invalid --layout {effective_layout!r}: expected 'list' or 'tabs'",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    if dry_run:
+        resolved_payload: dict[str, object] = {
+            "telegram_chat_id": chat_id,
+            "layout": effective_layout,
+            "layout_source": "cli" if layout is not None else "config",
+        }
+        planned_actions = [
+            f"set topics layout to {effective_layout!r} for chat {chat_id}"
+        ]
+        payload = {
+            "status": "dry_run",
+            "dry_run": True,
+            "command": "groups.set-layout",
+            "would": (
+                f"set topics layout for chat {chat_id} to {effective_layout!r}"
+            ),
+            "resolved": resolved_payload,
+            "planned_actions": planned_actions,
+            "warnings": [],
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, default=str))
+        return
+
+    async def _run() -> dict[str, object]:
+        try:
+            group_backend, _folder_backend = await open_backends()
+            request = LayoutSetRequest(
+                telegram_chat_id=chat_id,
+                layout=effective_layout,  # type: ignore[arg-type]
+            )
+            result, op = await set_topics_layout(
+                backend=group_backend, store=store, request=request
+            )
+            payload = result.to_dict()
+            payload["operation_id"] = op.id
+            payload["operation_status"] = op.status.value
+            return payload
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        payload = asyncio.run(_run())
+    except (
+        GroupLayoutSetPending,
+        GroupLayoutSetNeedsReview,
+        GroupLayoutSetFailed,
+    ) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"groups set-layout failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(json.dumps(payload, sort_keys=True, default=str))
+
+
+@groups_app.command("get-layout")
+def groups_get_layout(
+    chat_id: int = typer.Option(
+        ...,
+        "--chat-id",
+        help="Numeric Telegram chat id of the forum supergroup.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
+        exists=False,
+    ),
+) -> None:
+    """Read the current topics layout ('list' or 'tabs') for a forum chat."""
+    from telegram_planfix_assistant.groups import get_topics_layout
+
+    _config, manager, _store, open_backends = _build_group_backends(config_path)
+
+    async def _run() -> str:
+        try:
+            group_backend, _folder_backend = await open_backends()
+            return await get_topics_layout(
+                backend=group_backend, telegram_chat_id=chat_id
+            )
+        finally:
+            try:
+                await manager.disconnect()
+            except Exception:
+                pass
+
+    try:
+        layout = asyncio.run(_run())
+    except Exception as exc:
+        typer.echo(f"groups get-layout failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(layout)
+
+
 # --- topics -----------------------------------------------------------------
 
 topics_app = typer.Typer(help="Manage forum topics.", no_args_is_help=True)

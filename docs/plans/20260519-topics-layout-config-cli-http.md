@@ -111,12 +111,12 @@ Reference chats the user wants to verify against:
 
 ### Task 4: Add CLI commands `groups set-layout` and `groups get-layout`
 
-- [ ] in `cli/main.py`, add `@groups_app.command("set-layout")` accepting `--chat-id`, `--layout list|tabs` (default sourced from `config.telegram.defaults.topics_layout`), `--dry-run`, `--config`
-- [ ] add `@groups_app.command("get-layout")` accepting `--chat-id`, `--config`; prints `list` or `tabs` to stdout
-- [ ] dry-run must resolve the chat and print the intended change without calling the backend (match the dry-run shape used by `topics close`)
-- [ ] write CLI tests in `tests/test_cli_groups_layout.py` using `CliRunner` + fake backend factory: success path for both commands
-- [ ] write CLI tests for dry-run path (no backend call), invalid `--layout` value, missing `--chat-id`
-- [ ] run `pytest tests/test_cli_groups_layout.py` and full `pytest` — must pass before Task 5
+- [x] in `cli/main.py`, add `@groups_app.command("set-layout")` accepting `--chat-id`, `--layout list|tabs` (default sourced from `config.telegram.defaults.topics_layout`), `--dry-run`, `--config`
+- [x] add `@groups_app.command("get-layout")` accepting `--chat-id`, `--config`; prints `list` or `tabs` to stdout
+- [x] dry-run must resolve the chat and print the intended change without calling the backend (match the dry-run shape used by `topics close`)
+- [x] write CLI tests in `tests/test_cli_groups_layout.py` using `CliRunner` + fake backend factory: success path for both commands
+- [x] write CLI tests for dry-run path (no backend call), invalid `--layout` value, missing `--chat-id`
+- [x] run `pytest tests/test_cli_groups_layout.py` and full `pytest` — must pass before Task 5
 
 ### Task 5: Apply config default during `groups create`
 
