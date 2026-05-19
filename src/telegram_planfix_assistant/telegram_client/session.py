@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from telegram_planfix_assistant.config.models import AppConfig, TelegramConfig
+from telegram_planfix_assistant.telegram_client.proxy import parse_proxy_url
 
 
 class _TelethonLike(Protocol):
@@ -27,7 +28,7 @@ class _TelethonLike(Protocol):
     async def sign_in(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-ClientFactory = Callable[[str, int, str], _TelethonLike]
+ClientFactory = Callable[..., _TelethonLike]
 
 
 @dataclass(frozen=True)
@@ -40,12 +41,28 @@ class SessionState:
     me: Any | None = None
 
 
-def _default_factory(session_path: str, api_id: int, api_hash: str) -> _TelethonLike:
+def _default_factory(
+    session_path: str,
+    api_id: int,
+    api_hash: str,
+    *,
+    proxy: dict | None = None,
+) -> _TelethonLike:
     # Imported lazily so tests do not require Telethon to be installed or for
     # the import to succeed before they are able to swap in a mock factory.
     from telethon import TelegramClient
 
-    return TelegramClient(session_path, api_id, api_hash)
+    kwargs: dict = {}
+    if proxy is not None:
+        try:
+            import python_socks  # noqa: F401
+        except ImportError as exc:
+            raise ImportError(
+                "Proxy support requires python-socks[asyncio]. "
+                "Install with: pip install 'python-socks[asyncio]'"
+            ) from exc
+        kwargs["proxy"] = proxy
+    return TelegramClient(session_path, api_id, api_hash, **kwargs)
 
 
 class TelethonSessionManager:
@@ -82,10 +99,13 @@ class TelethonSessionManager:
         of handing out a client that never finished connecting).
         """
         if self._client is None:
+            proxy = parse_proxy_url(self._config.proxy_url)
+            factory_kwargs: dict = {"proxy": proxy} if proxy is not None else {}
             self._client = self._factory(
                 self._config.session_path,
                 self._config.api_id,
                 self._config.api_hash,
+                **factory_kwargs,
             )
         try:
             await self._client.connect()

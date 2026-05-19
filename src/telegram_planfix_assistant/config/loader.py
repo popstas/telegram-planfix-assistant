@@ -19,6 +19,7 @@ DEFAULT_CONFIG_TEMPLATE = """\
 telegram:
   api_id: 0                       # REPLACE_ME — int from https://my.telegram.org
   api_hash: "REPLACE_ME"          # REPLACE_ME — string from https://my.telegram.org
+  # proxy_url: "socks5://user:pass@host:1080"  # optional; supports socks5/socks4/http/https
   session_path: "~/.config/telegram-planfix-assistant/sessions/planfix-assistant-main/session.session"
   main_account_label: planfix-assistant-main
   reserve_admins:

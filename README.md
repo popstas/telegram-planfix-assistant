@@ -29,6 +29,15 @@ Config is read from `data/config.yml` by default. The `data/` directory is exclu
 
 If `./data/config.yml` is absent, the loader falls back to `~/.config/telegram-planfix-assistant/config.yml`. On a clean machine, running any CLI command without `--config` will create a template at that path with `REPLACE_ME` placeholders for `api_id`, `api_hash`, and `bearer_token` — fill them in and re-run.
 
+To reach Telegram through a proxy, set `telegram.proxy_url` to a single URL — supported schemes are `socks5`, `socks4`, `http`, and `https`. Credentials and explicit ports are optional:
+
+```yaml
+telegram:
+  proxy_url: "socks5://user:pass@host:1080"   # or http://host:8080, socks4://host, ...
+```
+
+Leave it unset (or remove the line) to connect directly.
+
 See `docs/plans/20260518-telegram-planfix-assistant-mvp.md` for the full configuration schema and feature scope.
 
 ## Docker

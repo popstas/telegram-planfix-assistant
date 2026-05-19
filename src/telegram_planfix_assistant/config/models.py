@@ -30,6 +30,26 @@ class TelegramConfig(BaseModel):
     reserve_members: list[str] = Field(default_factory=list)
     default_chat_folder: DefaultChatFolderConfig
     defaults: TelegramDefaults = Field(default_factory=TelegramDefaults)
+    proxy_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional proxy URL for Telethon, e.g. socks5://user:pass@host:1080 "
+            "or http://host:8080. Supported schemes: socks5, socks4, http, https."
+        ),
+    )
+
+    @field_validator("proxy_url")
+    @classmethod
+    def _proxy_url_well_formed(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        from telegram_planfix_assistant.telegram_client.proxy import parse_proxy_url
+
+        try:
+            parse_proxy_url(v)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return v
 
 
 class HttpConfig(BaseModel):
