@@ -122,6 +122,10 @@ def normalize_user_ref(raw: str) -> NormalizedMember:
     * ``@username`` or bare ``username``
     * ``+15551234567`` or any digit string of 7–15 digits (treated as phone)
     * Numeric user id (positive integer, possibly with a leading ``-``)
+
+    Telegram usernames are case-insensitive, so the ``value`` for ``username``
+    kind is lowercased: ``@PlanFix_Bot`` and ``@planfix_bot`` collapse to the
+    same canonical key. The original input is kept in ``raw``.
     """
     if raw is None:
         raise ValueError("user reference must not be None")
@@ -132,12 +136,12 @@ def normalize_user_ref(raw: str) -> NormalizedMember:
         bare = text[1:].strip()
         if not bare:
             raise ValueError(f"invalid username reference: {raw!r}")
-        return NormalizedMember(raw=text, kind="username", value=f"@{bare}")
+        return NormalizedMember(raw=text, kind="username", value=f"@{bare.lower()}")
     if text.startswith("+") and _PHONE_RE.match(text):
         return NormalizedMember(raw=text, kind="phone", value=text)
     if _USER_ID_RE.match(text):
         return NormalizedMember(raw=text, kind="user_id", value=text)
-    return NormalizedMember(raw=text, kind="username", value=f"@{text}")
+    return NormalizedMember(raw=text, kind="username", value=f"@{text.lower()}")
 
 
 # ---------------------------------------------------------------------------
