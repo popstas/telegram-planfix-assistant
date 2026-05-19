@@ -148,11 +148,11 @@ Reference chats the user wants to verify against:
 
 ### Task 8: Add CLI Commands section to README
 
-- [ ] add a `## Commands` section to `README.md` after `## Quick start`, listing all CLI commands grouped by resource (auth, health, version, groups, topics, members, messages, folders, operations) with one-line descriptions sourced from each Typer command's help text
-- [ ] include the two new layout commands in the `groups` group
-- [ ] add a short "Updating this list" note pointing readers at `cli/main.py` and the skill inventory test
-- [ ] no dedicated test, but the `test_skill_inventory.py` guard from Task 7 indirectly catches missing entries when SKILL.md and README drift together
-- [ ] run `pytest` — must pass before Task 9
+- [x] add a `## Commands` section to `README.md` after `## Quick start`, listing all CLI commands grouped by resource (auth, health, version, groups, topics, members, messages, folders, operations) with one-line descriptions sourced from each Typer command's help text
+- [x] include the two new layout commands in the `groups` group
+- [x] add a short "Updating this list" note pointing readers at `cli/main.py` and the skill inventory test
+- [x] no dedicated test, but the `test_skill_inventory.py` guard from Task 7 indirectly catches missing entries when SKILL.md and README drift together
+- [x] run `pytest` — must pass before Task 9
 
 ### Task 9: Update CLAUDE.md with the "always update the skill" rule
 

@@ -23,6 +23,49 @@ telegram-planfix-assistant health    # show current health
 uvicorn telegram_planfix_assistant.http_api.app:create_app --factory --port 8085
 ```
 
+## Commands
+
+Every CLI subcommand maps 1:1 to an HTTP endpoint (except the admin-only commands `auth`, `operations status`, and `operations retry`). Run any command with `--help` for full flag documentation.
+
+Top-level:
+
+- `auth` — interactive Telethon login for the technical account.
+- `health` — report service health (Telegram session, database, default folder).
+- `version` — print the installed version.
+
+`groups` — manage Telegram supergroups:
+
+- `groups create` — create a Telegram supergroup for a Planfix client.
+- `groups set-layout` — set the topics layout (`list` vs `tabs`) for an existing forum chat.
+- `groups get-layout` — read the current topics layout (`list` or `tabs`) for a forum chat.
+
+`topics` — manage forum topics:
+
+- `topics create` — create a single forum topic in an existing supergroup.
+- `topics bulk-create` — bulk-create topics from a CSV or JSON file.
+- `topics close` — close an existing forum topic (the topic and its history are kept).
+
+`members` — manage group membership:
+
+- `members bulk-add` — bulk-add members to an existing supergroup, optionally promoting to admin.
+- `members bulk-remove` — bulk-remove members from a supergroup (kick or permanently ban).
+
+`messages` — send messages and service commands:
+
+- `messages send` — send a message or service command (targeted or folder-wide mass mode).
+
+`folders` — inspect and manage chat folders:
+
+- `folders inspect` — inspect a chat folder and list its chats.
+- `folders add-chat` — move an existing chat into a folder.
+
+`operations` — inspect and retry queued operations:
+
+- `operations status` — show the status of an operation, including per-item summary.
+- `operations retry` — reset a failed/`needs_review` operation (and its items) back to pending.
+
+Updating this list: descriptions are sourced from each Typer command's docstring in `src/telegram_planfix_assistant/cli/main.py`. When you add or rename a command, update this section, `skills/telegram-planfix-assistant/SKILL.md`, and re-run `pytest tests/test_skill_inventory.py` — the inventory guard fails if the README/skill catalog drifts from the CLI.
+
 ## Configuration
 
 Config is read from `data/config.yml` by default. The `data/` directory is excluded from version control and holds the Telethon session, SQLite database, and secrets.

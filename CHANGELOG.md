@@ -5,6 +5,7 @@
 
 ### Features
 
+- skill: Document groups layout commands and add inventory guard
 - http: Add groups layout get/set endpoints
 - groups: Apply topics_layout default after create
 - cli: Add groups set-layout and get-layout commands
