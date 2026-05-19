@@ -61,7 +61,7 @@ The Telethon session is written to `/data` and persists across container restart
 A self-contained smoke script lives at `scripts/docker-smoke.sh`. It builds the image, starts a throwaway container with a temporary `data/config.yml`, polls `GET /health` until it returns `200`, and tears everything down.
 
 ```bash
-scripts/docker-smoke.sh
+bash scripts/docker-smoke.sh
 ```
 
 ## Tests
