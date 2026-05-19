@@ -670,3 +670,91 @@ Request: «Перелогинь технический аккаунт.»
    chat and never relays them.
 3. Once the human confirms the relogin is done, the agent re-runs
    `health` before any further state-changing command.
+
+## When the agent must stop and ask
+
+The agent stops and asks the human in any of the following situations.
+"Stop" means: do not run another command, do not guess, do not retry.
+Reuse the short templates from "Clarification templates" below.
+
+- The request maps to no entry in the Resources & actions table — the
+  resource/action is unclear or the request asks for something the CLI
+  cannot do.
+- A required parameter is missing: no username for `members bulk-add`
+  / `members bulk-remove`, no chat reference for any chat-scoped
+  command, no topic for `topics create` / `topics close`, no text for
+  `messages send`, no `--operation-id` for `operations status` /
+  `operations retry`.
+- A lookup is ambiguous: more than one chat matches the title, more
+  than one topic matches the name, more than one user matches the
+  alias.
+- `telegram-planfix-assistant health` reported any non-`ok` field or
+  a non-zero exit. Surface the message verbatim; do not run anything
+  else first.
+- `--dry-run` returned an error or `status != dry_run`. Show the
+  error to the human and ask before retrying or changing parameters.
+- The dry-run plan touches a protected account (configured reserve
+  admins / reserve members or `@planfix_bot`) — never add `--force`
+  on the agent's own initiative.
+- The human asks for an action that is not in the resource/action
+  table (writing a new bot, calling Telethon directly, editing
+  `data/config.yml`, etc.). Decline and ask whether the CLI flow
+  covers what they need.
+- The request implies the agent should run `auth` itself, or collect
+  a phone, code or 2FA password from the chat.
+
+## Clarification templates
+
+Keep clarifications short and direct. One question per turn, no
+preamble, no apologies. Plain Russian, no bureaucratese.
+
+- Missing username:
+  «Не вижу username, кого добавить?»
+- Missing chat:
+  «В каком чате это сделать? Назови чат или укажи `--chat-id`.»
+- Missing topic:
+  «В каком топике? Укажи название топика.»
+- Missing message text:
+  «Какой текст отправить?»
+- Missing operation id:
+  «Какая операция? Пришли её id.»
+- Ambiguous chat:
+  «Нашёл несколько чатов с похожим названием, какой выбрать?»
+- Ambiguous topic:
+  «В этом чате несколько топиков с таким названием. Какой именно?»
+- Ambiguous user:
+  «Этому имени соответствует несколько аккаунтов, какой именно?»
+- Health is not ok:
+  «`health` показал проблему: <сообщение>. Что делаем?»
+- Dry-run failed:
+  «dry-run упал: <сообщение>. Проверь название/параметры?»
+- Protected account touched:
+  «В плане затронут технический аккаунт <имя>. Добавить `--force`
+  и продолжить?»
+- Action is out of scope:
+  «Этого в CLI нет. Подойдёт <ближайшая команда> или нужно ручное
+  действие?»
+
+## What is out of scope
+
+The skill describes how to drive the existing CLI. It does not
+authorise the agent to:
+
+- write another Telegram bot or any new long-running service;
+- stand up a new HTTP API, webhook receiver, or worker;
+- add Planfix-side automation (Planfix scenarios, webhooks, custom
+  fields) — the project handles Planfix elsewhere;
+- import `telethon` or talk to Telegram MTProto directly;
+- call the project's HTTP API from inside the skill — the CLI is the
+  only entry point;
+- change Telegram state without a confirmed plan;
+- guess a chat, topic, or user when the match is not exact — always
+  ask;
+- bypass `--dry-run` for any state-changing command that supports it;
+- remove protected accounts (reserve admins / reserve members /
+  `@planfix_bot`) without an explicit human ask and `--force`;
+- collect phones, login codes, or 2FA passwords in chat — `auth` is
+  always run by a human in a terminal;
+- use real client names, real usernames, or real invite links in any
+  example, plan, or log line — only the anonymized identifiers
+  documented under "Scenarios".
