@@ -212,12 +212,14 @@ async def test_set_topics_layout_translates_flood_wait_on_resolver() -> None:
 
 
 class _FullChannelClient:
-    """Returns a ``GetFullChannelRequest`` response with a configurable
-    ``forum_tabs`` value (or omits the attribute entirely).
+    """Returns a ``GetFullChannelRequest`` response shaped like real Telegram:
+    ``forum_tabs`` lives on the ``Channel`` constructor (returned in
+    ``messages.ChatFull.chats``), not on ``ChannelFull``.
     """
 
-    def __init__(self, *, forum_tabs: Any = "missing") -> None:
+    def __init__(self, *, forum_tabs: Any = "missing", chat_id: int = 1) -> None:
         self._forum_tabs = forum_tabs
+        self._chat_id = chat_id
         self.calls: list[Any] = []
 
     async def get_input_entity(self, chat_id: int) -> _Peer:
@@ -226,11 +228,14 @@ class _FullChannelClient:
     async def __call__(self, request: Any) -> Any:
         self.calls.append(request)
 
+        full_chat = type("FC", (), {"id": self._chat_id})()
         if self._forum_tabs == "missing":
-            full_chat = type("FC", (), {})()
+            channel = type("CH", (), {"id": self._chat_id})()
         else:
-            full_chat = type("FC", (), {"forum_tabs": self._forum_tabs})()
-        return type("R", (), {"full_chat": full_chat})()
+            channel = type(
+                "CH", (), {"id": self._chat_id, "forum_tabs": self._forum_tabs}
+            )()
+        return type("R", (), {"full_chat": full_chat, "chats": [channel]})()
 
 
 @pytest.mark.asyncio

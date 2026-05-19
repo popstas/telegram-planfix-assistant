@@ -20,7 +20,7 @@ Reference chats the user wants to verify against:
 - Telethon semantics (verified against Telegram core docs):
   - `ToggleForumRequest(channel, enabled=True, tabs=True)` → tabs view
   - `ToggleForumRequest(channel, enabled=True, tabs=False)` → list view
-  - Read via `GetFullChannelRequest(channel).full_chat.forum_tabs` (boolean; `True` = tabs)
+  - Read via `GetFullChannelRequest(channel)`: `forum_tabs` is a flag on the `Channel` constructor (flags2.19), not on `ChannelFull`. Locate the matching `Channel` in `messages.ChatFull.chats` by `full_chat.id`.
   - `ToggleViewForumAsMessagesRequest` is **not** the right call — it controls a per-account preference, not the admin layout.
 - Critical files:
   - `src/telegram_planfix_assistant/config/models.py` — add `TopicsLayout` literal + field on `TelegramDefaults`.
@@ -68,7 +68,7 @@ Reference chats the user wants to verify against:
 **Telethon calls**:
 
 - Set: `await client(ToggleForumRequest(channel=await client.get_input_entity(chat_id), enabled=True, tabs=bool))`
-- Get: `full = await client(GetFullChannelRequest(channel=await client.get_input_entity(chat_id))); return bool(getattr(full.full_chat, "forum_tabs", False))`
+- Get: `full = await client(GetFullChannelRequest(channel=await client.get_input_entity(chat_id)))`; locate the `Channel` in `full.chats` matching `full.full_chat.id`, then `return bool(getattr(channel, "forum_tabs", False))`. (`forum_tabs` is a flag on `Channel`, not on `ChannelFull`.)
 
 **Idempotency key**: `group_layout_set:{chat_id}:{layout}`. Setting the same layout twice replays the completed operation; switching layouts creates a new operation row.
 
@@ -93,7 +93,7 @@ Reference chats the user wants to verify against:
 
 - [x] in `src/telegram_planfix_assistant/groups/service.py`, extend the `GroupBackend` Protocol with `async def set_topics_layout(self, chat_id: int, tabs: bool) -> None` and `async def get_topics_layout(self, chat_id: int) -> bool`
 - [x] in `src/telegram_planfix_assistant/groups/telethon_backend.py`, implement `set_topics_layout` using `from telethon.tl.functions.channels import ToggleForumRequest`, calling `ToggleForumRequest(channel=input_channel, enabled=True, tabs=tabs)`; wrap `FloodWaitError` via the existing `translate_flood_wait()` helper
-- [x] in the same file, implement `get_topics_layout` using `from telethon.tl.functions.channels import GetFullChannelRequest`, returning `bool(getattr(full.full_chat, "forum_tabs", False))`
+- [x] in the same file, implement `get_topics_layout` using `from telethon.tl.functions.channels import GetFullChannelRequest`: read `forum_tabs` from the matching `Channel` in `full.chats` (resolved by `full.full_chat.id`), since `forum_tabs` is a flag on `Channel`, not on `ChannelFull`
 - [x] create `tests/test_groups_layout.py` with a fake backend that records calls, asserting the service-layer mapping (string ↔ bool) round-trips correctly (deferred to Task 3, which lands the service helpers; this task covers the adapter-level round-trip)
 - [x] write error-case tests in `tests/test_groups_layout.py` for the Telethon adapter (FLOOD_WAIT translation, missing attribute defaults to `False`)
 - [x] run `pytest tests/test_groups_layout.py` and full `pytest` — must pass before Task 3

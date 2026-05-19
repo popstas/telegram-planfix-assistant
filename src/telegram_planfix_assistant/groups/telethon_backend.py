@@ -173,5 +173,17 @@ class TelethonGroupBackend:
             full = await self._client(GetFullChannelRequest(channel=channel))
         except Exception as exc:
             raise translate_flood_wait(exc) from exc
+        # `forum_tabs` is a flag on the Channel constructor (flags2.19), not
+        # on ChannelFull. Telegram returns the matching Channel in
+        # `messages.ChatFull.chats`; resolve it by id from `full_chat.id` and
+        # fall back to the first chat if Telegram only returned one.
+        chats = list(getattr(full, "chats", None) or [])
         full_chat = getattr(full, "full_chat", None)
-        return bool(getattr(full_chat, "forum_tabs", False))
+        target_id = int(getattr(full_chat, "id", 0)) if full_chat is not None else 0
+        target = next(
+            (c for c in chats if int(getattr(c, "id", 0)) == target_id),
+            None,
+        )
+        if target is None and chats:
+            target = chats[0]
+        return bool(getattr(target, "forum_tabs", False))
