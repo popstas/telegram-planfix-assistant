@@ -120,13 +120,13 @@ Reference chats the user wants to verify against:
 
 ### Task 5: Apply config default during `groups create`
 
-- [ ] in `groups/service.py::create_group`, after a successful supergroup create with `enable_topics=True`, call `backend.set_topics_layout(chat_id, _layout_to_tabs(config.telegram.defaults.topics_layout))`
-- [ ] handle errors from the post-create layout call as a separate operation status (do not fail the create itself — log a warning; the group already exists and idempotency-keyed retries handle layout separately)
-- [ ] extend `tests/test_groups.py` (or `test_groups_create.py` if present): `topics_layout=tabs` config → backend.set_topics_layout called with `tabs=True`
-- [ ] extend the same test file: `topics_layout=list` config → called with `tabs=False`
-- [ ] extend the same test file: `enable_topics=False` → `set_topics_layout` not called at all
-- [ ] extend the same test file: post-create layout failure → create still returns success; warning logged
-- [ ] run `pytest` — must pass before Task 6
+- [x] in `groups/service.py::create_group`, after a successful supergroup create with `enable_topics=True`, call `backend.set_topics_layout(chat_id, _layout_to_tabs(config.telegram.defaults.topics_layout))`
+- [x] handle errors from the post-create layout call as a separate operation status (do not fail the create itself — log a warning; the group already exists and idempotency-keyed retries handle layout separately)
+- [x] extend `tests/test_groups.py` (or `test_groups_create.py` if present): `topics_layout=tabs` config → backend.set_topics_layout called with `tabs=True`
+- [x] extend the same test file: `topics_layout=list` config → called with `tabs=False`
+- [x] extend the same test file: `enable_topics=False` → `set_topics_layout` not called at all
+- [x] extend the same test file: post-create layout failure → create still returns success; warning logged
+- [x] run `pytest` — must pass before Task 6
 
 ### Task 6: Add HTTP endpoints
 

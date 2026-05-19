@@ -5,6 +5,7 @@
 
 ### Features
 
+- cli: Add groups set-layout and get-layout commands
 - groups: Add set/get topics_layout service functions
 - groups: Add topics-layout backend protocol and Telethon adapter
 - config: Add topics_layout default to TelegramDefaults

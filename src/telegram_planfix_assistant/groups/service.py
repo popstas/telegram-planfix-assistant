@@ -12,6 +12,7 @@ a completed call returns the saved result without touching Telegram.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -30,6 +31,8 @@ from telegram_planfix_assistant.persistence.models import (
 )
 from telegram_planfix_assistant.persistence.store import OperationStore
 from telegram_planfix_assistant.worker.queue import FloodWaitError
+
+logger = logging.getLogger(__name__)
 
 PLANFIX_BOT_USERNAME = "@planfix_bot"
 
@@ -258,6 +261,23 @@ async def _execute_create(
         about=request.about,
         enable_topics=enable_topics,
     )
+
+    if enable_topics:
+        layout = config.defaults.topics_layout
+        try:
+            await backend.set_topics_layout(
+                chat_id=chat_id, tabs=_layout_to_tabs(layout)
+            )
+        except Exception as exc:
+            # The chat is already created and the layout default is a soft
+            # preference — don't fail the create. The operator can retry via
+            # `groups set-layout` later, which carries its own idempotency row.
+            logger.warning(
+                "post-create set_topics_layout failed for chat %s (layout=%s): %s",
+                chat_id,
+                layout,
+                exc,
+            )
 
     reserve_admins = _resolved_reserves(
         request.reserve_admins,

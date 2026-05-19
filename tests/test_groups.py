@@ -48,16 +48,20 @@ class FakeGroupBackend:
         fail_on_add: set[str] | None = None,
         fail_on_promote: set[str] | None = None,
         invite_link: str | None = "https://t.me/+invitehash",
+        set_layout_error: Exception | None = None,
     ) -> None:
         self._chat_id = chat_id
         self._fail_on_add = fail_on_add or set()
         self._fail_on_promote = fail_on_promote or set()
         self._invite_link = invite_link
+        self._set_layout_error = set_layout_error
         self.created: list[dict[str, Any]] = []
         self.added: list[str] = []
         self.promoted: list[str] = []
         self.messages: list[tuple[int, str]] = []
         self.invite_calls = 0
+        self.layout_calls: list[tuple[int, bool]] = []
+        self.current_tabs: bool = False
 
     async def create_supergroup(
         self,
@@ -90,6 +94,15 @@ class FakeGroupBackend:
     async def send_message(self, *, chat_id: int, text: str) -> int:
         self.messages.append((chat_id, text))
         return 42
+
+    async def set_topics_layout(self, *, chat_id: int, tabs: bool) -> None:
+        if self._set_layout_error is not None:
+            raise self._set_layout_error
+        self.layout_calls.append((chat_id, tabs))
+        self.current_tabs = tabs
+
+    async def get_topics_layout(self, *, chat_id: int) -> bool:
+        return self.current_tabs
 
 
 class FakeFolderBackend:
@@ -391,6 +404,116 @@ async def test_create_group_failure_records_failed(
             config=config.telegram,
             request=request,
         )
+
+
+def _config_with_layout(minimal_config_yaml: str, layout: str) -> Any:
+    """Return a TelegramConfig with topics_layout set explicitly."""
+    body = minimal_config_yaml.replace(
+        "create_invite_link: true",
+        f"create_invite_link: true\n    topics_layout: {layout}",
+    )
+    return load_config_from_text(body)
+
+
+async def test_create_group_applies_tabs_layout_after_create(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config_with_layout(minimal_config_yaml, "tabs")
+    backend = FakeGroupBackend()
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=1, skip_reserve=True)
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.topics_enabled is True
+    assert backend.layout_calls == [(-100123, True)]
+
+
+async def test_create_group_applies_list_layout_after_create(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config_with_layout(minimal_config_yaml, "list")
+    backend = FakeGroupBackend()
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=2, skip_reserve=True)
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.topics_enabled is True
+    assert backend.layout_calls == [(-100123, False)]
+
+
+async def test_create_group_skips_layout_when_topics_disabled(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config_with_layout(minimal_config_yaml, "tabs")
+    backend = FakeGroupBackend()
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(
+        title="Acme",
+        planfix_task_id=3,
+        skip_reserve=True,
+        enable_topics=False,
+    )
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.topics_enabled is False
+    assert backend.layout_calls == []
+
+
+async def test_create_group_layout_failure_does_not_fail_create(
+    minimal_config_yaml: str,
+    store: OperationStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging as _logging
+
+    config = _config_with_layout(minimal_config_yaml, "tabs")
+    backend = FakeGroupBackend(
+        set_layout_error=RuntimeError("chat is not a forum"),
+    )
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=4, skip_reserve=True)
+
+    with caplog.at_level(
+        _logging.WARNING, logger="telegram_planfix_assistant.groups.service"
+    ):
+        result, op = await create_group(
+            backend=backend,
+            folder_backend=folder_backend,
+            store=store,
+            config=config.telegram,
+            request=request,
+        )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.topics_enabled is True
+    assert backend.layout_calls == []
+    warnings = [r for r in caplog.records if "post-create set_topics_layout" in r.message]
+    assert warnings, "expected a warning about the post-create layout failure"
+    assert "chat is not a forum" in warnings[0].getMessage()
 
 
 async def test_create_group_skip_folder_bypasses_folder_resolution(
