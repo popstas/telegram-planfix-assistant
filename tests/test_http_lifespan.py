@@ -18,11 +18,27 @@ from telegram_planfix_assistant.http_api import create_app
 from telegram_planfix_assistant.telegram_client import session as session_module
 
 
+class _FakeFolder:
+    def __init__(self, folder_id: int, title: str) -> None:
+        self.id = folder_id
+        self.title = title
+        self.include_peers: list[Any] = []
+        self.pinned_peers: list[Any] = []
+
+
+class _FakeFilters:
+    def __init__(self, filters: list[Any]) -> None:
+        self.filters = filters
+
+
 class _FakeClient:
     def __init__(self) -> None:
         self.connect_calls = 0
         self.disconnect_calls = 0
         self.authorized = True
+        # One filter matching the minimal_config_yaml folder so the health
+        # probe's resolve_folder call succeeds.
+        self.folders = [_FakeFolder(2, "Planfix clients")]
 
     async def connect(self) -> None:
         self.connect_calls += 1
@@ -35,6 +51,9 @@ class _FakeClient:
 
     async def get_me(self) -> Any:
         return type("Me", (), {"id": 1, "username": "fake"})()
+
+    async def __call__(self, _request: Any) -> Any:
+        return _FakeFilters(list(self.folders))
 
 
 def test_create_app_auto_constructs_session_manager_and_connects_on_startup(

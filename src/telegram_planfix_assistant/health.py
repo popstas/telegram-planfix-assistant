@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Awaitable, Callable
+from contextlib import closing
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -58,7 +59,10 @@ async def probe_database(database_path: Path) -> str:
     """Verify the SQLite database file is reachable and queryable."""
     try:
         database_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(str(database_path)) as conn:
+        # `with sqlite3.connect(...)` only commits/rolls back on exit; it does
+        # not close the connection. Wrap in `closing(...)` so liveness-probe
+        # traffic doesn't leak descriptors until GC finalizes them.
+        with closing(sqlite3.connect(str(database_path))) as conn:
             conn.execute("SELECT 1").fetchone()
         return DATABASE_OK
     except Exception:
@@ -68,22 +72,40 @@ async def probe_database(database_path: Path) -> str:
 async def probe_default_folder(
     manager: TelethonSessionManager | None,
     folder_name: str,
+    *,
+    folder_id: int | None = None,
 ) -> str:
-    """Best-effort folder probe.
+    """Probe whether the configured chat folder exists in Telegram.
 
-    The full folder resolver lands in Task 6; until then the probe can only
-    distinguish ``missing`` (no usable Telethon session) from ``ok`` (session
-    is authorized so the folder lookup is at least possible). The probe never
-    auto-creates a folder.
+    Reports ``missing`` when the Telethon session is unauthorized, when the
+    folder cannot be listed, or when no folder matches ``folder_name`` (and
+    ``folder_id``, when supplied). The probe never auto-creates a folder.
     """
-    del folder_name  # consumed by the real resolver in Task 6
     if manager is None:
         return FOLDER_MISSING
     try:
         state = await manager.state()
     except Exception:
         return FOLDER_MISSING
-    return FOLDER_OK if state.authorized else FOLDER_MISSING
+    if not state.authorized:
+        return FOLDER_MISSING
+    try:
+        client = await manager.get_client()
+    except Exception:
+        return FOLDER_MISSING
+    try:
+        from telegram_planfix_assistant.folders import (
+            TelethonFolderBackend,
+            resolve_folder,
+        )
+
+        backend = TelethonFolderBackend(client)
+        await resolve_folder(
+            backend, folder_name=folder_name, folder_id=folder_id
+        )
+    except Exception:
+        return FOLDER_MISSING
+    return FOLDER_OK
 
 
 async def collect_health(
@@ -102,6 +124,7 @@ async def collect_health(
     """
     db_path = database_path if database_path is not None else default_database_path(config)
     folder_name = config.telegram.default_chat_folder.folder_name
+    folder_id = config.telegram.default_chat_folder.folder_id
 
     session_status = await (
         session_probe() if session_probe is not None else probe_telegram_session(session_manager)
@@ -112,7 +135,9 @@ async def collect_health(
     folder_status = await (
         folder_probe()
         if folder_probe is not None
-        else probe_default_folder(session_manager, folder_name)
+        else probe_default_folder(
+            session_manager, folder_name, folder_id=folder_id
+        )
     )
 
     return HealthReport(

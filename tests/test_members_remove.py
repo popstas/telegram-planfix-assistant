@@ -371,6 +371,42 @@ def test_http_bulk_remove_rejects_invalid_mode(
     assert resp.status_code == 400
 
 
+def test_http_bulk_remove_refuses_protected_without_force(
+    minimal_config_yaml: str,
+) -> None:
+    backend = FakeMemberRemoveBackend()
+    client = _http_client(minimal_config_yaml, backend)
+    resp = client.post(
+        "/telegram/groups/-100/members/bulk-remove",
+        json={
+            "operation_id": "op-prot",
+            "items": [{"user": "@alice"}, {"user": "@planfix_bot"}],
+        },
+        headers={"Authorization": "Bearer secret_token"},
+    )
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["detail"]["error"] == "protected_accounts"
+    assert body["detail"]["users"] == ["@planfix_bot"]
+
+
+def test_http_bulk_remove_allows_protected_with_force(
+    minimal_config_yaml: str,
+) -> None:
+    backend = FakeMemberRemoveBackend()
+    client = _http_client(minimal_config_yaml, backend)
+    resp = client.post(
+        "/telegram/groups/-100/members/bulk-remove",
+        json={
+            "operation_id": "op-force",
+            "items": [{"user": "@planfix_bot"}],
+            "force": True,
+        },
+        headers={"Authorization": "Bearer secret_token"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------

@@ -77,6 +77,19 @@ def build_router() -> APIRouter:
         backend, folder_backend = _backends_or_503(request)
         store = _store_or_503(request)
 
+        # Refuse up front when folder placement is requested but the folder
+        # backend isn't ready. Without this guard the supergroup is created on
+        # Telegram first, then `create_group` raises FolderPeerFailureError,
+        # leaving an orphan group behind on every unauthorized request.
+        if not body.skip_folder and folder_backend is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "Telegram folder backend is not available; "
+                    "set skip_folder=true to create the group without folder placement"
+                ),
+            )
+
         domain_request = GroupCreateRequest(
             title=body.title,
             planfix_task_id=body.planfix_task_id,

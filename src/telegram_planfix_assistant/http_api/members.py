@@ -23,6 +23,8 @@ from telegram_planfix_assistant.members import (
     MemberRemoveBackend,
     bulk_add_members,
     bulk_remove_members,
+    normalize_user_ref,
+    protected_user_set,
 )
 from telegram_planfix_assistant.persistence.store import OperationStore
 from telegram_planfix_assistant.worker.queue import WorkerQueue
@@ -48,6 +50,7 @@ class BulkMemberRemoveBody(BaseModel):
     mode: str = "ban_unban"
     continue_on_error: bool = True
     operation_id: str | None = None
+    force: bool = False
 
 
 def _member_backend_or_503(request: Request) -> MemberAddBackend:
@@ -184,6 +187,34 @@ def build_router() -> APIRouter:
         backend = _member_remove_backend_or_503(request)
         store = _store_or_503(request)
         queue = _worker_queue_for_request(request)
+
+        # Mirror the CLI's protected-account guard so an authenticated caller
+        # can't accidentally (or deliberately) kick the reserve admins or the
+        # @planfix_bot service account that the integration relies on. The
+        # caller must pass `force: true` to remove protected accounts.
+        if not body.force:
+            config = getattr(request.app.state, "config", None)
+            if config is not None and getattr(config, "telegram", None) is not None:
+                protected = protected_user_set(config=config.telegram)
+                blocked: list[str] = []
+                for it in body.items:
+                    try:
+                        if normalize_user_ref(it.user).value in protected:
+                            blocked.append(it.user)
+                    except ValueError:
+                        continue
+                if blocked:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "error": "protected_accounts",
+                            "message": (
+                                "refusing to remove protected accounts without "
+                                "force=true"
+                            ),
+                            "users": blocked,
+                        },
+                    )
 
         domain_items = tuple(
             BulkMemberRemoveItem(user=it.user) for it in body.items

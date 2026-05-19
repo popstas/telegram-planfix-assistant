@@ -11,6 +11,7 @@ import typer
 from telegram_planfix_assistant import __version__
 from telegram_planfix_assistant.config import ConfigError, load_config
 from telegram_planfix_assistant.health import collect_health, default_database_path
+from telegram_planfix_assistant.observability.logging import configure_logging
 from telegram_planfix_assistant.persistence import (
     OperationNotFoundError,
     OperationStatus,
@@ -19,6 +20,18 @@ from telegram_planfix_assistant.persistence import (
 from telegram_planfix_assistant.telegram_client.session import (
     TelethonSessionManager,
 )
+
+
+def _apply_logging_from_config(config_path: Path | None) -> None:
+    """Honor `logging.level` from config when present; ignore failures."""
+    try:
+        config = load_config(config_path)
+    except Exception:
+        return
+    try:
+        configure_logging(level=config.logging.level, force=True)
+    except Exception:
+        return
 
 app = typer.Typer(
     name="telegram-planfix-assistant",
@@ -46,6 +59,10 @@ def _build_session_manager(config_path: Path | None) -> TelethonSessionManager:
     except ConfigError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
+    try:
+        configure_logging(level=config.logging.level, force=True)
+    except Exception:
+        pass
     return TelethonSessionManager(config.telegram)
 
 
@@ -1526,6 +1543,13 @@ def messages_send(
         resolve_topic_id_by_name,
     )
 
+    if mass and (chat_id is not None or chat_name is not None):
+        typer.echo(
+            "--mass cannot be combined with --chat-id or --chat-name; "
+            "mass mode sends to every chat in --folder-name that has --topic-name.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
     is_mass = mass or (chat_id is None and chat_name is None)
     if is_mass and topic_name is None:
         typer.echo(

@@ -30,7 +30,11 @@ from telegram_planfix_assistant.persistence.models import (
     OperationStatus,
 )
 from telegram_planfix_assistant.persistence.store import OperationStore
-from telegram_planfix_assistant.worker.queue import BulkItemSpec, WorkerQueue
+from telegram_planfix_assistant.worker.queue import (
+    BulkItemSpec,
+    FloodWaitError,
+    WorkerQueue,
+)
 
 
 class TopicError(RuntimeError):
@@ -219,6 +223,11 @@ async def _execute_create(
             text=text,
             topic_id=topic_id,
         )
+    except FloodWaitError:
+        # When this function runs under the queue's bulk handler, FLOOD_WAIT
+        # must propagate so the queue can pause-and-retry the whole item
+        # instead of silently producing a topic without its first message.
+        raise
     except Exception:
         # First-message failure is non-fatal — the topic itself was created.
         # The caller can resend manually. We record the attempt without a
@@ -283,6 +292,14 @@ async def create_topic(
     operation_id = begin.operation.id
     try:
         result = await _execute_create(backend=backend, request=request)
+    except FloodWaitError as exc:
+        # FLOOD_WAIT is transient — don't burn the idempotency key on `failed`
+        # (terminal) because the next caller would be stuck. Marking
+        # needs_review lets an operator `operations retry` after the window.
+        store.mark_needs_review(
+            operation_id, f"FLOOD_WAIT during topic create: {exc}"
+        )
+        raise TopicCreateNeedsReview(str(exc)) from exc
     except TopicError:
         raise
     except Exception as exc:
@@ -778,6 +795,14 @@ async def close_topic(
             chat_id=request.telegram_chat_id,
             topic_id=request.telegram_topic_id,
         )
+    except FloodWaitError as exc:
+        # Same reasoning as create_topic: FLOOD_WAIT must not lock the
+        # idempotency key into a terminal failure. Promote to needs_review so
+        # the operator can retry once the window expires.
+        store.mark_needs_review(
+            operation_id, f"FLOOD_WAIT during topic close: {exc}"
+        )
+        raise TopicCloseNeedsReview(str(exc)) from exc
     except TopicError:
         raise
     except Exception as exc:

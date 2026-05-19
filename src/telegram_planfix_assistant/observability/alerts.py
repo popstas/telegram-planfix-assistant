@@ -136,6 +136,11 @@ class AlertEmitter:
 
     def __init__(self, sinks: Iterable[AlertSink]) -> None:
         self._sinks = list(sinks)
+        # Tasks scheduled by ``emit_sync`` are anchored here so the event-loop
+        # GC can't reclaim them before they finish; ``asyncio.create_task``'s
+        # only strong reference is from the caller, and our caller is the
+        # function returning to a sync frame.
+        self._pending: set[asyncio.Task[None]] = set()
 
     @property
     def sinks(self) -> list[AlertSink]:
@@ -157,7 +162,9 @@ class AlertEmitter:
         except RuntimeError:
             asyncio.run(self.emit(event))
         else:
-            loop.create_task(self.emit(event))
+            task = loop.create_task(self.emit(event))
+            self._pending.add(task)
+            task.add_done_callback(self._pending.discard)
 
 
 class FloodWaitTracker:

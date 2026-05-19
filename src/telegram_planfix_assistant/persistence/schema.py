@@ -7,6 +7,7 @@ tests can all invoke it without coordinating.
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from pathlib import Path
 
@@ -85,7 +86,9 @@ def connect(database_path: Path) -> sqlite3.Connection:
 
 def bootstrap(database_path: Path) -> None:
     """Create the persistence schema if it does not already exist."""
-    with connect(database_path) as conn:
+    # contextlib.closing ensures the connection is actually closed on exit;
+    # sqlite3.Connection's own context manager only manages the transaction.
+    with contextlib.closing(connect(database_path)) as conn:
         conn.execute("BEGIN")
         conn.execute(_OPERATIONS_DDL)
         conn.execute(_OPERATION_ITEMS_DDL)

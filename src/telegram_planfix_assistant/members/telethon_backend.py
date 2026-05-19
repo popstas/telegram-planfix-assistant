@@ -17,6 +17,7 @@ from telegram_planfix_assistant.members.service import (
     MemberNotPresentError,
     MemberPrivacyError,
 )
+from telegram_planfix_assistant.worker.queue import FloodWaitError
 
 # Telegram's RPC error class names that map to our domain errors. We match by
 # class name so we don't have to import telethon at module load — the import
@@ -40,6 +41,9 @@ _NOT_PRESENT_RPC_ERRORS = {
 
 def _classify_rpc_error(exc: Exception) -> Exception:
     name = type(exc).__name__
+    if name == "FloodWaitError":
+        seconds = getattr(exc, "seconds", 0) or 0
+        return FloodWaitError(float(seconds))
     if name in _PRIVACY_RPC_ERRORS:
         return MemberPrivacyError(str(exc) or name)
     if name in _ALREADY_PRESENT_RPC_ERRORS:
@@ -58,9 +62,9 @@ class TelethonMemberBackend:
     async def add_member(self, *, chat_id: int, user: str) -> None:
         from telethon.tl.functions.channels import InviteToChannelRequest
 
-        channel = await self._client.get_input_entity(chat_id)
-        member = await self._client.get_input_entity(user)
         try:
+            channel = await self._client.get_input_entity(chat_id)
+            member = await self._client.get_input_entity(user)
             await self._client(
                 InviteToChannelRequest(channel=channel, users=[member])
             )
@@ -71,8 +75,11 @@ class TelethonMemberBackend:
         from telethon.tl.functions.channels import EditAdminRequest
         from telethon.tl.types import ChatAdminRights
 
-        channel = await self._client.get_input_entity(chat_id)
-        member = await self._client.get_input_entity(user)
+        try:
+            channel = await self._client.get_input_entity(chat_id)
+            member = await self._client.get_input_entity(user)
+        except Exception as exc:
+            raise _classify_rpc_error(exc) from exc
         rights = ChatAdminRights(
             change_info=True,
             post_messages=False,
@@ -87,21 +94,27 @@ class TelethonMemberBackend:
             other=True,
             manage_topics=True,
         )
-        await self._client(
-            EditAdminRequest(
-                channel=channel,
-                user_id=member,
-                admin_rights=rights,
-                rank="admin",
+        try:
+            await self._client(
+                EditAdminRequest(
+                    channel=channel,
+                    user_id=member,
+                    admin_rights=rights,
+                    rank="admin",
+                )
             )
-        )
+        except Exception as exc:
+            raise _classify_rpc_error(exc) from exc
 
     async def ban_member(self, *, chat_id: int, user: str) -> None:
         from telethon.tl.functions.channels import EditBannedRequest
         from telethon.tl.types import ChatBannedRights
 
-        channel = await self._client.get_input_entity(chat_id)
-        member = await self._client.get_input_entity(user)
+        try:
+            channel = await self._client.get_input_entity(chat_id)
+            member = await self._client.get_input_entity(user)
+        except Exception as exc:
+            raise _classify_rpc_error(exc) from exc
         banned = ChatBannedRights(
             until_date=None,
             view_messages=True,
@@ -124,8 +137,11 @@ class TelethonMemberBackend:
         from telethon.tl.functions.channels import EditBannedRequest
         from telethon.tl.types import ChatBannedRights
 
-        channel = await self._client.get_input_entity(chat_id)
-        member = await self._client.get_input_entity(user)
+        try:
+            channel = await self._client.get_input_entity(chat_id)
+            member = await self._client.get_input_entity(user)
+        except Exception as exc:
+            raise _classify_rpc_error(exc) from exc
         cleared = ChatBannedRights(until_date=None)
         try:
             await self._client(
