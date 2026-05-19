@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: generate-changelog
+        name: Generate changelog
+        entry: bash -c 'git-cliff -o CHANGELOG.md && git add CHANGELOG.md'
+        language: python
+        additional_dependencies: ["git-cliff>=2.0.0"]
+        pass_filenames: false
+        stages: [pre-commit]
