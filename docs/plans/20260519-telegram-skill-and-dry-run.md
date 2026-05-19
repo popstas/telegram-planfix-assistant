@@ -115,12 +115,12 @@
 
 ### Task 3: Добавить `--dry-run` в команды членства и сообщений
 
-- [ ] добавить `--dry-run` в `members bulk-add` (chat, folder, CSV, users, roles, кто уже есть, кого нельзя добавить)
-- [ ] добавить `--dry-run` в `members bulk-remove` (chat, folder, CSV, users, кто есть/кого нет, защита технических аккаунтов и `@planfix_bot` без `--force`)
-- [ ] добавить `--dry-run` в `messages send` (chat/folder/topic, текст, массовый режим по folder + topic name, список получателей)
-- [ ] убедиться, что в dry-run не отправляется ни одно сообщение и не меняется ни один состав группы
-- [ ] write tests for new dry-run flag in members/messages commands
-- [ ] run project tests - must pass before next task
+- [x] добавить `--dry-run` в `members bulk-add` (chat, folder, CSV, users, roles, кто уже есть, кого нельзя добавить)
+- [x] добавить `--dry-run` в `members bulk-remove` (chat, folder, CSV, users, кто есть/кого нет, защита технических аккаунтов и `@planfix_bot` без `--force`)
+- [x] добавить `--dry-run` в `messages send` (chat/folder/topic, текст, массовый режим по folder + topic name, список получателей)
+- [x] убедиться, что в dry-run не отправляется ни одно сообщение и не меняется ни один состав группы
+- [x] write tests for new dry-run flag in members/messages commands
+- [x] run project tests - must pass before next task
 
 ### Task 4: Добавить `--dry-run` в команды folders и operations
 
