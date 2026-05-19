@@ -9,7 +9,14 @@ from telegram_planfix_assistant.groups.service import (
     GroupCreateRequest,
     GroupCreateResult,
     GroupError,
+    GroupLayoutSetFailed,
+    GroupLayoutSetNeedsReview,
+    GroupLayoutSetPending,
+    LayoutSetRequest,
+    LayoutSetResult,
     create_group,
+    get_topics_layout,
+    set_topics_layout,
 )
 
 __all__ = [
@@ -21,5 +28,12 @@ __all__ = [
     "GroupCreateRequest",
     "GroupCreateResult",
     "GroupError",
+    "GroupLayoutSetFailed",
+    "GroupLayoutSetNeedsReview",
+    "GroupLayoutSetPending",
+    "LayoutSetRequest",
+    "LayoutSetResult",
     "create_group",
+    "get_topics_layout",
+    "set_topics_layout",
 ]

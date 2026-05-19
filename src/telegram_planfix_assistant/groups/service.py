@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from telegram_planfix_assistant.config.models import TelegramConfig
+from telegram_planfix_assistant.config.models import TelegramConfig, TopicsLayout
 from telegram_planfix_assistant.folders.service import (
     FolderBackend,
     FolderError,
@@ -48,6 +48,32 @@ class GroupCreatePending(GroupError):
 
 class GroupCreateNeedsReview(GroupError):
     """A previous attempt resulted in ``needs_review`` and must not auto-retry."""
+
+
+class GroupLayoutSetFailed(GroupError):
+    """A previous layout-set attempt with this idempotency key already failed."""
+
+
+class GroupLayoutSetPending(GroupError):
+    """A concurrent layout-set attempt with this idempotency key is in flight."""
+
+
+class GroupLayoutSetNeedsReview(GroupError):
+    """A previous layout-set attempt resulted in needs_review."""
+
+
+def _layout_to_tabs(layout: str) -> bool:
+    """Map the public ``"list" | "tabs"`` string to the Telethon ``tabs`` flag."""
+    if layout == "tabs":
+        return True
+    if layout == "list":
+        return False
+    raise ValueError(f"unknown topics layout {layout!r}; expected 'list' or 'tabs'")
+
+
+def _tabs_to_layout(tabs: bool) -> TopicsLayout:
+    """Inverse of :func:`_layout_to_tabs`."""
+    return "tabs" if tabs else "list"
 
 
 @dataclass(frozen=True)
@@ -448,3 +474,131 @@ async def create_group(
 
     op = store.complete_operation(operation_id, result.to_dict())
     return result, op
+
+
+# ---------------------------------------------------------------------------
+# Topics layout (list / tabs)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LayoutSetRequest:
+    """Input shape for :func:`set_topics_layout`."""
+
+    telegram_chat_id: int
+    layout: TopicsLayout
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "telegram_chat_id": self.telegram_chat_id,
+            "layout": self.layout,
+        }
+
+
+@dataclass(frozen=True)
+class LayoutSetResult:
+    """Result returned by :func:`set_topics_layout` and its replay path."""
+
+    telegram_chat_id: int
+    layout: TopicsLayout
+    replayed: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "telegram_chat_id": self.telegram_chat_id,
+            "layout": self.layout,
+            "replayed": self.replayed,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> LayoutSetResult:
+        layout = payload.get("layout", "list")
+        if layout not in ("list", "tabs"):
+            raise ValueError(f"unknown layout {layout!r} in saved payload")
+        return cls(
+            telegram_chat_id=int(payload["telegram_chat_id"]),
+            layout=layout,
+            replayed=True,
+        )
+
+
+async def set_topics_layout(
+    *,
+    backend: GroupBackend,
+    store: OperationStore,
+    request: LayoutSetRequest,
+) -> tuple[LayoutSetResult, OperationRecord]:
+    """Set the topics layout for an existing forum chat, idempotently.
+
+    Idempotency key: ``group_layout_set:{chat_id}:{layout}``. Re-setting the
+    same layout twice replays the completed operation without touching
+    Telegram. Switching layouts (`list` <-> `tabs`) creates a new operation
+    row keyed under the new layout value, so each direction has its own
+    history.
+    """
+    if request.layout not in ("list", "tabs"):
+        raise ValueError(
+            f"set_topics_layout layout must be 'list' or 'tabs', got {request.layout!r}"
+        )
+
+    key = idempotency.group_layout_set_key(
+        telegram_chat_id=request.telegram_chat_id,
+        layout=request.layout,
+    )
+    begin = store.begin_operation(
+        operation_type=idempotency.GROUP_LAYOUT_SET,
+        idempotency_key=key,
+        request_payload=request.to_payload(),
+    )
+
+    if not begin.created:
+        op = begin.operation
+        if op.status is OperationStatus.COMPLETED:
+            payload = op.result_payload or {}
+            return LayoutSetResult.from_dict(payload), op
+        if op.status is OperationStatus.FAILED:
+            raise GroupLayoutSetFailed(op.error or "previous attempt failed")
+        if op.status is OperationStatus.NEEDS_REVIEW:
+            raise GroupLayoutSetNeedsReview(
+                op.error or "previous attempt needs review"
+            )
+        raise GroupLayoutSetPending(
+            f"operation {op.id} is still pending; retry via 'operations retry'"
+        )
+
+    operation_id = begin.operation.id
+    try:
+        await backend.set_topics_layout(
+            chat_id=request.telegram_chat_id,
+            tabs=_layout_to_tabs(request.layout),
+        )
+    except FloodWaitError as exc:
+        store.mark_needs_review(
+            operation_id, f"FLOOD_WAIT during set_topics_layout: {exc}"
+        )
+        raise GroupLayoutSetNeedsReview(str(exc)) from exc
+    except GroupError:
+        raise
+    except Exception as exc:
+        store.fail_operation(operation_id, str(exc))
+        raise
+
+    result = LayoutSetResult(
+        telegram_chat_id=request.telegram_chat_id,
+        layout=request.layout,
+    )
+    op = store.complete_operation(operation_id, result.to_dict())
+    return result, op
+
+
+async def get_topics_layout(
+    *,
+    backend: GroupBackend,
+    telegram_chat_id: int,
+) -> TopicsLayout:
+    """Return the current topics layout for ``telegram_chat_id``.
+
+    Pure read — does not touch :class:`OperationStore`.
+    """
+    tabs = await backend.get_topics_layout(chat_id=telegram_chat_id)
+    return _tabs_to_layout(bool(tabs))

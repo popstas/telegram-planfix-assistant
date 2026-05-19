@@ -100,14 +100,14 @@ Reference chats the user wants to verify against:
 
 ### Task 3: Add `set_topics_layout` and `get_topics_layout` service functions
 
-- [ ] add `LayoutSetRequest` / `LayoutSetResult` dataclasses (with `.to_payload()` / `.from_dict()`) in `groups/service.py`, matching the project's request/result conventions
-- [ ] add `set_topics_layout(request, *, backend, store, config) -> (LayoutSetResult, OperationRecord)` mirroring `close_topic`: idempotency key `group_layout_set:{chat_id}:{layout}`, FLOOD_WAIT → `needs_review`, other errors → `fail_operation`
-- [ ] add `get_topics_layout(chat_id, *, backend) -> "list" | "tabs"` (no OperationStore; pure read)
-- [ ] add helpers `_layout_to_tabs(layout)` and `_tabs_to_layout(tabs)`
-- [ ] register `group_layout_set_key(chat_id, layout)` alongside the other idempotency keys (e.g. `persistence/keys.py`)
-- [ ] write success-path tests in `tests/test_groups_layout.py`: replay-on-completed, fresh write path, get returns correct string for each bool, helpers round-trip
-- [ ] write error-path tests: FLOOD_WAIT → needs_review status, generic backend exception → failed status with message captured
-- [ ] run `pytest` — must pass before Task 4
+- [x] add `LayoutSetRequest` / `LayoutSetResult` dataclasses (with `.to_payload()` / `.from_dict()`) in `groups/service.py`, matching the project's request/result conventions
+- [x] add `set_topics_layout(request, *, backend, store, config) -> (LayoutSetResult, OperationRecord)` mirroring `close_topic`: idempotency key `group_layout_set:{chat_id}:{layout}`, FLOOD_WAIT → `needs_review`, other errors → `fail_operation`
+- [x] add `get_topics_layout(chat_id, *, backend) -> "list" | "tabs"` (no OperationStore; pure read)
+- [x] add helpers `_layout_to_tabs(layout)` and `_tabs_to_layout(tabs)`
+- [x] register `group_layout_set_key(chat_id, layout)` alongside the other idempotency keys (in `persistence/idempotency.py`)
+- [x] write success-path tests in `tests/test_groups_layout.py`: replay-on-completed, fresh write path, get returns correct string for each bool, helpers round-trip
+- [x] write error-path tests: FLOOD_WAIT → needs_review status, generic backend exception → failed status with message captured
+- [x] run `pytest` — must pass before Task 4
 
 ### Task 4: Add CLI commands `groups set-layout` and `groups get-layout`
 

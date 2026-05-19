@@ -1,23 +1,36 @@
-"""Unit tests for the topics-layout backend additions.
+"""Unit tests for the topics-layout backend + service additions.
 
-Task 2 of the topics-layout plan only adds the protocol methods and the
-Telethon adapter; the service-layer set/get functions land in Task 3. These
-tests therefore cover:
+Covers:
 
-  * the Telethon adapter's ``set_topics_layout`` (both ``tabs`` paths and
-    FLOOD_WAIT translation)
-  * the Telethon adapter's ``get_topics_layout`` (boolean round-trip and the
-    missing-attribute default to ``False``)
+  * Telethon adapter ``set_topics_layout`` / ``get_topics_layout`` (Task 2)
+  * Service-layer ``set_topics_layout`` / ``get_topics_layout`` (Task 3),
+    including FLOOD_WAIT → needs_review, generic failure → failed, fresh
+    write, replay-on-completed, and the ``_layout_to_tabs`` /
+    ``_tabs_to_layout`` helper round-trip.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from telegram_planfix_assistant.groups.service import (
+    GroupLayoutSetFailed,
+    GroupLayoutSetNeedsReview,
+    LayoutSetRequest,
+    _layout_to_tabs,
+    _tabs_to_layout,
+    get_topics_layout,
+    set_topics_layout,
+)
 from telegram_planfix_assistant.groups.telethon_backend import (
     TelethonGroupBackend,
+)
+from telegram_planfix_assistant.persistence import (
+    OperationStatus,
+    OperationStore,
 )
 from telegram_planfix_assistant.worker.queue import FloodWaitError
 
@@ -252,3 +265,215 @@ async def test_get_topics_layout_translates_flood_wait_on_resolver() -> None:
     with pytest.raises(FloodWaitError) as excinfo:
         await backend.get_topics_layout(chat_id=42)
     assert excinfo.value.seconds == 4.0
+
+
+# ---------------------------------------------------------------------------
+# Service-layer tests (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def test_layout_to_tabs_round_trip() -> None:
+    assert _layout_to_tabs("tabs") is True
+    assert _layout_to_tabs("list") is False
+    assert _tabs_to_layout(True) == "tabs"
+    assert _tabs_to_layout(False) == "list"
+    assert _tabs_to_layout(_layout_to_tabs("tabs")) == "tabs"
+    assert _tabs_to_layout(_layout_to_tabs("list")) == "list"
+
+
+def test_layout_to_tabs_rejects_unknown_value() -> None:
+    with pytest.raises(ValueError):
+        _layout_to_tabs("grid")
+
+
+class _FakeGroupBackend:
+    """Minimal :class:`GroupBackend` for service-level tests.
+
+    Only the layout methods need to do real work — every other method on the
+    protocol exists so the fake satisfies the Protocol shape but raises if
+    accidentally called from one of these tests.
+    """
+
+    def __init__(
+        self,
+        *,
+        forum_tabs: bool = False,
+        set_error: Exception | None = None,
+    ) -> None:
+        self.forum_tabs = forum_tabs
+        self._set_error = set_error
+        self.set_calls: list[tuple[int, bool]] = []
+        self.get_calls: list[int] = []
+
+    async def create_supergroup(
+        self, *, title: str, about: str | None, enable_topics: bool
+    ) -> int:
+        raise NotImplementedError
+
+    async def add_member(self, *, chat_id: int, user: str) -> None:
+        raise NotImplementedError
+
+    async def promote_admin(self, *, chat_id: int, user: str) -> None:
+        raise NotImplementedError
+
+    async def create_invite_link(self, *, chat_id: int) -> str:
+        raise NotImplementedError
+
+    async def send_message(self, *, chat_id: int, text: str) -> int:
+        raise NotImplementedError
+
+    async def set_topics_layout(self, *, chat_id: int, tabs: bool) -> None:
+        if self._set_error is not None:
+            raise self._set_error
+        self.set_calls.append((chat_id, tabs))
+        self.forum_tabs = tabs
+
+    async def get_topics_layout(self, *, chat_id: int) -> bool:
+        self.get_calls.append(chat_id)
+        return self.forum_tabs
+
+
+@pytest.fixture()
+def store(tmp_path: Path) -> OperationStore:
+    return OperationStore(tmp_path / "state.db")
+
+
+@pytest.mark.asyncio
+async def test_set_topics_layout_fresh_write_to_tabs(store: OperationStore) -> None:
+    backend = _FakeGroupBackend(forum_tabs=False)
+    result, op = await set_topics_layout(
+        backend=backend,
+        store=store,
+        request=LayoutSetRequest(telegram_chat_id=-100, layout="tabs"),
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.telegram_chat_id == -100
+    assert result.layout == "tabs"
+    assert result.replayed is False
+    assert backend.set_calls == [(-100, True)]
+
+
+@pytest.mark.asyncio
+async def test_set_topics_layout_fresh_write_to_list(store: OperationStore) -> None:
+    backend = _FakeGroupBackend(forum_tabs=True)
+    result, op = await set_topics_layout(
+        backend=backend,
+        store=store,
+        request=LayoutSetRequest(telegram_chat_id=-100, layout="list"),
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.layout == "list"
+    assert backend.set_calls == [(-100, False)]
+
+
+@pytest.mark.asyncio
+async def test_set_topics_layout_replays_on_completed(
+    store: OperationStore,
+) -> None:
+    backend = _FakeGroupBackend()
+    request = LayoutSetRequest(telegram_chat_id=-100, layout="tabs")
+
+    first, op1 = await set_topics_layout(backend=backend, store=store, request=request)
+    assert first.replayed is False
+    assert backend.set_calls == [(-100, True)]
+
+    backend2 = _FakeGroupBackend()
+    second, op2 = await set_topics_layout(
+        backend=backend2, store=store, request=request
+    )
+    assert second.replayed is True
+    assert second.layout == "tabs"
+    assert op1.id == op2.id
+    assert backend2.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_set_topics_layout_distinct_keys_per_layout(
+    store: OperationStore,
+) -> None:
+    """Switching from tabs to list creates a new operation row keyed by the
+    new layout — the previous tabs operation stays completed.
+    """
+    backend = _FakeGroupBackend()
+    first, op1 = await set_topics_layout(
+        backend=backend,
+        store=store,
+        request=LayoutSetRequest(telegram_chat_id=-100, layout="tabs"),
+    )
+    second, op2 = await set_topics_layout(
+        backend=backend,
+        store=store,
+        request=LayoutSetRequest(telegram_chat_id=-100, layout="list"),
+    )
+    assert op1.id != op2.id
+    assert first.layout == "tabs"
+    assert second.layout == "list"
+    assert backend.set_calls == [(-100, True), (-100, False)]
+
+
+@pytest.mark.asyncio
+async def test_set_topics_layout_flood_wait_marks_needs_review(
+    store: OperationStore,
+) -> None:
+    backend = _FakeGroupBackend(set_error=FloodWaitError(seconds=12.0))
+    request = LayoutSetRequest(telegram_chat_id=-100, layout="tabs")
+
+    with pytest.raises(GroupLayoutSetNeedsReview):
+        await set_topics_layout(backend=backend, store=store, request=request)
+
+    # Replay raises NeedsReview, not FloodWaitError, and never hits the
+    # backend again.
+    backend2 = _FakeGroupBackend()
+    with pytest.raises(GroupLayoutSetNeedsReview):
+        await set_topics_layout(backend=backend2, store=store, request=request)
+    assert backend2.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_set_topics_layout_generic_error_marks_failed(
+    store: OperationStore,
+) -> None:
+    backend = _FakeGroupBackend(set_error=RuntimeError("chat is not a forum"))
+    request = LayoutSetRequest(telegram_chat_id=-100, layout="tabs")
+
+    with pytest.raises(RuntimeError, match="chat is not a forum"):
+        await set_topics_layout(backend=backend, store=store, request=request)
+
+    # The idempotency row now holds the captured error message.
+    backend2 = _FakeGroupBackend()
+    with pytest.raises(GroupLayoutSetFailed, match="chat is not a forum"):
+        await set_topics_layout(backend=backend2, store=store, request=request)
+    assert backend2.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_set_topics_layout_rejects_unknown_layout(
+    store: OperationStore,
+) -> None:
+    with pytest.raises(ValueError):
+        await set_topics_layout(
+            backend=_FakeGroupBackend(),
+            store=store,
+            request=LayoutSetRequest(
+                telegram_chat_id=-100,
+                layout="grid",  # type: ignore[arg-type]
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_topics_layout_service_returns_tabs() -> None:
+    backend = _FakeGroupBackend(forum_tabs=True)
+    layout = await get_topics_layout(backend=backend, telegram_chat_id=-100)
+    assert layout == "tabs"
+    assert backend.get_calls == [-100]
+
+
+@pytest.mark.asyncio
+async def test_get_topics_layout_service_returns_list() -> None:
+    backend = _FakeGroupBackend(forum_tabs=False)
+    layout = await get_topics_layout(backend=backend, telegram_chat_id=-100)
+    assert layout == "list"
+    assert backend.get_calls == [-100]

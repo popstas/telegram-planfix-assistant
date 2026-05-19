@@ -10,6 +10,7 @@ from __future__ import annotations
 OperationType = str
 
 GROUP_CREATE = "group_create"
+GROUP_LAYOUT_SET = "group_layout_set"
 TOPIC_CREATE = "topic_create"
 TOPIC_BULK_CREATE = "topic_bulk_create"
 TOPIC_CLOSE = "topic_close"
@@ -25,6 +26,14 @@ def group_create_key(*, planfix_task_id: int | str | None, title: str | None) ->
     if title is None or not title.strip():
         raise ValueError("group_create requires planfix_task_id or title")
     return f"{GROUP_CREATE}:title={title.strip()}"
+
+
+def group_layout_set_key(*, telegram_chat_id: int | str, layout: str) -> str:
+    if not str(telegram_chat_id).strip():
+        raise ValueError("group_layout_set requires a non-empty telegram_chat_id")
+    if layout not in ("list", "tabs"):
+        raise ValueError(f"group_layout_set layout must be 'list' or 'tabs', got {layout!r}")
+    return f"{GROUP_LAYOUT_SET}:chat={telegram_chat_id}:layout={layout}"
 
 
 def topic_create_key(

@@ -5,6 +5,7 @@
 
 ### Features
 
+- groups: Add topics-layout backend protocol and Telethon adapter
 - config: Add topics_layout default to TelegramDefaults
 - telegram: Add proxy_url config option
 - config: Add ~/.config fallback and bootstrap
