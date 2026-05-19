@@ -9,7 +9,41 @@ from pydantic import ValidationError
 
 from telegram_planfix_assistant.config.models import AppConfig
 
-DEFAULT_CONFIG_PATH = Path("data/config.yml")
+CWD_CONFIG_PATH = Path("data/config.yml")
+USER_CONFIG_PATH = Path.home() / ".config" / "telegram-planfix-assistant" / "config.yml"
+
+DEFAULT_CONFIG_TEMPLATE = """\
+# Telegram-Planfix Assistant config. Replace REPLACE_ME values before first run.
+# See docs/plans/completed/20260518-telegram-planfix-assistant-mvp.md for the full spec.
+
+telegram:
+  api_id: 0                       # REPLACE_ME — int from https://my.telegram.org
+  api_hash: "REPLACE_ME"          # REPLACE_ME — string from https://my.telegram.org
+  session_path: "~/.config/telegram-planfix-assistant/sessions/planfix-assistant-main/session.session"
+  main_account_label: planfix-assistant-main
+  reserve_admins:
+    - "@reserve_account"
+  reserve_members:
+    - "@planfix_bot"
+  default_chat_folder:
+    folder_name: "Planfix clients"  # must already exist in your Telegram account
+  defaults:
+    enable_topics: true
+    create_invite_link: true
+
+http:
+  host: "127.0.0.1"
+  port: 8085
+  bearer_token: "REPLACE_ME"      # REPLACE_ME — any long random string
+
+queue:
+  max_parallel_telegram_ops: 1
+  default_retry_delay_seconds: 30
+  flood_wait_safety_margin_seconds: 5
+
+logging:
+  level: INFO
+"""
 
 
 class ConfigError(Exception):
@@ -42,9 +76,7 @@ def load_config_from_text(text: str, *, source: str = "<string>") -> AppConfig:
         raise ConfigError(_format_validation_error(exc, source)) from exc
 
 
-def load_config(path: str | Path | None = None) -> AppConfig:
-    """Load and validate the application config from disk."""
-    config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+def _load_from(config_path: Path) -> AppConfig:
     if not config_path.exists():
         raise ConfigError(
             f"Config file not found at {config_path}. "
@@ -59,3 +91,37 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         raise ConfigError(f"Could not read config file {config_path}: {exc}") from exc
 
     return load_config_from_text(text, source=str(config_path))
+
+
+def _write_default_template(target: Path) -> None:
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(DEFAULT_CONFIG_TEMPLATE, encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"Could not create template at {target}: {exc}") from exc
+
+
+def load_config(path: str | Path | None = None) -> AppConfig:
+    """Load and validate the application config from disk.
+
+    Lookup order when no explicit `path` is given:
+      1. ./data/config.yml (relative to CWD; preserves Docker /app/data -> /data symlink)
+      2. ~/.config/telegram-planfix-assistant/config.yml
+
+    If neither exists, a template is written to the user path and ConfigError is raised
+    asking the operator to fill in REPLACE_ME values.
+    """
+    if path is not None:
+        return _load_from(Path(path))
+
+    if CWD_CONFIG_PATH.exists():
+        return _load_from(CWD_CONFIG_PATH)
+    if USER_CONFIG_PATH.exists():
+        return _load_from(USER_CONFIG_PATH)
+
+    _write_default_template(USER_CONFIG_PATH)
+    raise ConfigError(
+        f"No config file found. A template was created at {USER_CONFIG_PATH}.\n"
+        f"Edit it (replace REPLACE_ME values) and re-run.\n"
+        f"Alternatively, create {CWD_CONFIG_PATH} relative to the working directory."
+    )

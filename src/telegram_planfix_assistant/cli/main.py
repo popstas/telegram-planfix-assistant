@@ -72,7 +72,7 @@ def auth_cmd(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -128,7 +128,7 @@ def health_cmd(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -271,7 +271,7 @@ def groups_create(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -568,7 +568,7 @@ def topics_create(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -851,7 +851,7 @@ def topics_bulk_create(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -1131,7 +1131,7 @@ def topics_close(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -1461,7 +1461,7 @@ def members_bulk_add(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -1812,7 +1812,7 @@ def members_bulk_remove(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -2139,7 +2139,7 @@ def messages_send(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -2561,7 +2561,7 @@ def folders_inspect(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -2633,7 +2633,7 @@ def folders_add_chat(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -2825,7 +2825,7 @@ def operations_status(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:
@@ -2851,7 +2851,7 @@ def operations_retry(
         None,
         "--config",
         "-c",
-        help="Path to config.yml (defaults to data/config.yml).",
+        help="Path to config.yml (defaults: ./data/config.yml, then ~/.config/telegram-planfix-assistant/config.yml).",
         exists=False,
     ),
 ) -> None:

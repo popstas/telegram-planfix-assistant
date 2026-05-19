@@ -49,6 +49,7 @@
 
 ### Miscellaneous
 
+- Ignore installed skills and .claude
 - Chmod 644 docs
 - Drop exec bit on scripts/*.sh
 - Add git-cliff changelog and GitHub Actions workflows

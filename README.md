@@ -27,6 +27,8 @@ uvicorn telegram_planfix_assistant.http_api.app:create_app --factory --port 8085
 
 Config is read from `data/config.yml` by default. The `data/` directory is excluded from version control and holds the Telethon session, SQLite database, and secrets.
 
+If `./data/config.yml` is absent, the loader falls back to `~/.config/telegram-planfix-assistant/config.yml`. On a clean machine, running any CLI command without `--config` will create a template at that path with `REPLACE_ME` placeholders for `api_id`, `api_hash`, and `bearer_token` — fill them in and re-run.
+
 See `docs/plans/20260518-telegram-planfix-assistant-mvp.md` for the full configuration schema and feature scope.
 
 ## Docker

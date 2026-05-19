@@ -12,6 +12,8 @@ from telegram_planfix_assistant.config import (
     load_config,
     load_config_from_text,
 )
+from telegram_planfix_assistant.config import loader as loader_module
+from telegram_planfix_assistant.config.loader import DEFAULT_CONFIG_TEMPLATE
 
 
 def test_load_valid_config_from_text(minimal_config_yaml: str) -> None:
@@ -235,3 +237,96 @@ def test_non_mapping_top_level_rejected(tmp_path: Path) -> None:
     with pytest.raises(ConfigError) as excinfo:
         load_config(f)
     assert "mapping" in str(excinfo.value)
+
+
+# --- lookup order + bootstrap -------------------------------------------------
+
+
+@pytest.fixture()
+def patched_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    cwd_path = tmp_path / "cwd" / "data" / "config.yml"
+    user_path = tmp_path / "home" / ".config" / "telegram-planfix-assistant" / "config.yml"
+    monkeypatch.setattr(loader_module, "CWD_CONFIG_PATH", cwd_path)
+    monkeypatch.setattr(loader_module, "USER_CONFIG_PATH", user_path)
+    return {"cwd": cwd_path, "user": user_path}
+
+
+def test_explicit_missing_path_does_not_bootstrap(
+    patched_paths: dict[str, Path], tmp_path: Path
+) -> None:
+    with pytest.raises(ConfigError, match="not found"):
+        load_config(tmp_path / "nowhere.yml")
+    assert not patched_paths["user"].exists()
+
+
+def test_cwd_config_used_when_present(
+    patched_paths: dict[str, Path], minimal_config_yaml: str
+) -> None:
+    patched_paths["cwd"].parent.mkdir(parents=True, exist_ok=True)
+    patched_paths["cwd"].write_text(minimal_config_yaml, encoding="utf-8")
+    cfg = load_config()
+    assert cfg.http.bearer_token == "secret_token"
+
+
+def test_user_config_used_when_cwd_missing(
+    patched_paths: dict[str, Path], minimal_config_yaml: str
+) -> None:
+    patched_paths["user"].parent.mkdir(parents=True, exist_ok=True)
+    patched_paths["user"].write_text(minimal_config_yaml, encoding="utf-8")
+    cfg = load_config()
+    assert cfg.http.bearer_token == "secret_token"
+
+
+def test_cwd_takes_precedence_over_user(
+    patched_paths: dict[str, Path], minimal_config_yaml: str
+) -> None:
+    patched_paths["cwd"].parent.mkdir(parents=True, exist_ok=True)
+    patched_paths["cwd"].write_text(minimal_config_yaml, encoding="utf-8")
+    patched_paths["user"].parent.mkdir(parents=True, exist_ok=True)
+    patched_paths["user"].write_text(
+        minimal_config_yaml.replace("secret_token", "user_token"), encoding="utf-8"
+    )
+    cfg = load_config()
+    assert cfg.http.bearer_token == "secret_token"
+
+
+def test_neither_present_bootstraps_template(patched_paths: dict[str, Path]) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        load_config()
+
+    user_path = patched_paths["user"]
+    assert user_path.exists()
+    assert user_path.read_text(encoding="utf-8") == DEFAULT_CONFIG_TEMPLATE
+    msg = str(excinfo.value)
+    assert str(user_path) in msg
+    assert "REPLACE_ME" in msg
+
+
+def test_template_validates_after_filling_placeholders(
+    patched_paths: dict[str, Path],
+) -> None:
+    with pytest.raises(ConfigError):
+        load_config()
+
+    user_path = patched_paths["user"]
+    text = user_path.read_text(encoding="utf-8")
+    text = text.replace("api_id: 0", "api_id: 123456")
+    text = text.replace('api_hash: "REPLACE_ME"', 'api_hash: "real_api_hash"')
+    text = text.replace('bearer_token: "REPLACE_ME"', 'bearer_token: "real_bearer"')
+    user_path.write_text(text, encoding="utf-8")
+
+    cfg = load_config()
+    assert cfg.telegram.api_id == 123456
+    assert cfg.telegram.api_hash == "real_api_hash"
+    assert cfg.http.bearer_token == "real_bearer"
+
+
+def test_bootstrap_failure_wraps_oserror(
+    patched_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(self: Path, *args: object, **kwargs: object) -> None:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "mkdir", boom)
+    with pytest.raises(ConfigError, match="Could not create template"):
+        load_config()
