@@ -37,5 +37,6 @@
 
 ### Miscellaneous
 
+- Add git-cliff changelog and GitHub Actions workflows
 - Initial commit with spec and ralphex plan
 
