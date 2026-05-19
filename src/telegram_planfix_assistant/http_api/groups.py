@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from telegram_planfix_assistant.folders import FolderBackend, FolderError
@@ -14,10 +14,22 @@ from telegram_planfix_assistant.groups import (
     GroupCreateNeedsReview,
     GroupCreatePending,
     GroupCreateRequest,
+    GroupLayoutSetFailed,
+    GroupLayoutSetNeedsReview,
+    GroupLayoutSetPending,
+    LayoutSetRequest,
     create_group,
+    get_topics_layout,
+    set_topics_layout,
 )
 from telegram_planfix_assistant.http_api.auth import BearerAuth
 from telegram_planfix_assistant.persistence.store import OperationStore
+from telegram_planfix_assistant.worker.queue import FloodWaitError
+
+
+class LayoutSetBody(BaseModel):
+    chat_id: int
+    layout: Literal["list", "tabs"]
 
 
 class GroupCreateBody(BaseModel):
@@ -144,5 +156,63 @@ def build_router() -> APIRouter:
         payload["operation_id"] = op.id
         payload["operation_status"] = op.status.value
         return payload
+
+    @router.post("/groups/layout")
+    async def set_layout(
+        body: LayoutSetBody, request: Request
+    ) -> dict[str, Any]:
+        backend, _ = _backends_or_503(request)
+        store = _store_or_503(request)
+
+        domain_request = LayoutSetRequest(
+            telegram_chat_id=body.chat_id,
+            layout=body.layout,
+        )
+
+        try:
+            result, op = await set_topics_layout(
+                backend=backend, store=store, request=domain_request
+            )
+        except GroupLayoutSetPending as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": "pending", "message": str(exc)},
+            ) from exc
+        except GroupLayoutSetNeedsReview as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"error": "needs_review", "message": str(exc)},
+            ) from exc
+        except GroupLayoutSetFailed as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": "previous_attempt_failed", "message": str(exc)},
+            ) from exc
+        except FloodWaitError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"error": "needs_review", "message": str(exc)},
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+        payload = result.to_dict()
+        payload["operation_id"] = op.id
+        payload["operation_status"] = op.status.value
+        return payload
+
+    @router.get("/groups/layout")
+    async def get_layout(
+        request: Request,
+        chat_id: int = Query(...),
+    ) -> dict[str, Any]:
+        backend, _ = _backends_or_503(request)
+        layout = await get_topics_layout(
+            backend=backend, telegram_chat_id=chat_id
+        )
+        return {"chat_id": chat_id, "layout": layout}
 
     return router

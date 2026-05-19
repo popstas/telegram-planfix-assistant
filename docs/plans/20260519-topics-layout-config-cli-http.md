@@ -130,11 +130,11 @@ Reference chats the user wants to verify against:
 
 ### Task 6: Add HTTP endpoints
 
-- [ ] in `http_api/groups.py`, add `POST /telegram/groups/layout` with body `{ chat_id: int, layout: "list" | "tabs" }` returning the operation record + new layout; respond 503 when `group_backend_factory()` returns `None` (preserve existing factory contract)
-- [ ] add `GET /telegram/groups/layout?chat_id=…` returning `{ chat_id, layout }`; same 503 contract
-- [ ] write HTTP tests in `tests/test_http_groups_layout.py` (mirror existing `tests/test_http_*` style): success path for both methods
-- [ ] write HTTP tests for failure modes: 503 on unbuilt backend, 422 on invalid layout enum, 401/403 when bearer token missing
-- [ ] run `pytest tests/test_http_groups_layout.py` and full `pytest` — must pass before Task 7
+- [x] in `http_api/groups.py`, add `POST /telegram/groups/layout` with body `{ chat_id: int, layout: "list" | "tabs" }` returning the operation record + new layout; respond 503 when `group_backend_factory()` returns `None` (preserve existing factory contract)
+- [x] add `GET /telegram/groups/layout?chat_id=…` returning `{ chat_id, layout }`; same 503 contract
+- [x] write HTTP tests in `tests/test_http_groups_layout.py` (mirror existing `tests/test_http_*` style): success path for both methods
+- [x] write HTTP tests for failure modes: 503 on unbuilt backend, 422 on invalid layout enum, 401/403 when bearer token missing
+- [x] run `pytest tests/test_http_groups_layout.py` and full `pytest` — must pass before Task 7
 
 ### Task 7: Update SKILL.md and add inventory guard
 

@@ -5,6 +5,7 @@
 
 ### Features
 
+- groups: Apply topics_layout default after create
 - cli: Add groups set-layout and get-layout commands
 - groups: Add set/get topics_layout service functions
 - groups: Add topics-layout backend protocol and Telethon adapter
