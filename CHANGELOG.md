@@ -5,6 +5,7 @@
 
 ### Features
 
+- Audit CLI dry-run state and define shared envelope contract
 - Run live e2e against real Telegram and harden production wiring (task 18)
 - Add e2e test scaffolding (task 17)
 - Verify MVP acceptance criteria (task 16)

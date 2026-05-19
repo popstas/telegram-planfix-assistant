@@ -262,6 +262,11 @@ def groups_create(
         "--skip-folder",
         help="Do not place the new group into any folder.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the request and report the plan without creating the group.",
+    ),
     config_path: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -271,12 +276,21 @@ def groups_create(
     ),
 ) -> None:
     """Create a Telegram supergroup for a Planfix client."""
+    from telegram_planfix_assistant.folders import (
+        FolderError,
+        resolve_folder,
+    )
     from telegram_planfix_assistant.groups import (
         GroupCreateFailed,
         GroupCreateNeedsReview,
         GroupCreatePending,
         GroupCreateRequest,
         create_group,
+    )
+    from telegram_planfix_assistant.groups.service import (
+        PLANFIX_BOT_USERNAME,
+        _dedupe,
+        _resolved_reserves,
     )
 
     config, manager, store, open_backends = _build_group_backends(config_path)
@@ -309,6 +323,142 @@ def groups_create(
         folder_id=folder_id,
         skip_folder=skip_folder,
     )
+
+    if dry_run:
+        if not request.title.strip() and request.planfix_task_id is None:
+            typer.echo(
+                "group create requires planfix_task_id or non-empty title",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+
+        enable_topics_eff = (
+            request.enable_topics
+            if request.enable_topics is not None
+            else config.telegram.defaults.enable_topics
+        )
+        create_link_eff = (
+            request.create_invite_link
+            if request.create_invite_link is not None
+            else config.telegram.defaults.create_invite_link
+        )
+        reserve_admins_eff = _resolved_reserves(
+            request.reserve_admins,
+            fallback=config.telegram.reserve_admins,
+            skip=request.skip_reserve,
+        )
+        reserve_members_eff = _resolved_reserves(
+            request.reserve_members,
+            fallback=config.telegram.reserve_members,
+            skip=request.skip_reserve,
+        )
+        planned_members = _dedupe(
+            [
+                *request.members,
+                *reserve_members_eff,
+                *request.admins,
+                *reserve_admins_eff,
+            ]
+        )
+        planned_admins = _dedupe([*request.admins, *reserve_admins_eff])
+        planfix_bot_in_members = any(
+            u.lstrip("@").lower() == PLANFIX_BOT_USERNAME.lstrip("@").lower()
+            for u in planned_members
+        )
+
+        folder_payload: dict[str, object] | None = None
+        warnings: list[str] = []
+        if not request.skip_folder:
+            target_folder_name = (
+                request.folder_name
+                or config.telegram.default_chat_folder.folder_name
+            )
+            target_folder_id = (
+                request.folder_id
+                if request.folder_id is not None
+                else config.telegram.default_chat_folder.folder_id
+            )
+
+            async def _check_folder() -> dict[str, object]:
+                try:
+                    _, folder_backend = await open_backends()
+                    snapshot = await resolve_folder(
+                        folder_backend,
+                        folder_name=target_folder_name,
+                        folder_id=target_folder_id,
+                    )
+                    return {
+                        "folder_id": snapshot.folder_id,
+                        "folder_name": snapshot.folder_name,
+                    }
+                finally:
+                    try:
+                        await manager.disconnect()
+                    except Exception:
+                        pass
+
+            try:
+                folder_payload = asyncio.run(_check_folder())
+            except FolderError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(code=2) from exc
+            except Exception as exc:
+                typer.echo(f"groups create failed: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+        else:
+            warnings.append("--skip-folder: new group will not be placed into any folder")
+
+        planned_actions: list[str] = [
+            f"create supergroup title={request.title!r} enable_topics={enable_topics_eff}",
+        ]
+        for u in planned_members:
+            planned_actions.append(f"add member {u}")
+        for u in planned_admins:
+            planned_actions.append(f"promote admin {u}")
+        if create_link_eff:
+            planned_actions.append("create invite link")
+        if folder_payload is not None:
+            planned_actions.append(
+                f"place chat into folder {folder_payload['folder_name']!r}"
+            )
+        if request.planfix_task_id is not None and planfix_bot_in_members:
+            planned_actions.append(
+                f"send '/task {request.planfix_task_id}' service message"
+            )
+        if request.planfix_task_id is not None and not planfix_bot_in_members:
+            warnings.append(
+                "planfix_task_id is set but @planfix_bot is not in the planned member list; "
+                "the '/task <id>' service message will be skipped"
+            )
+
+        resolved: dict[str, object] = {
+            "title": request.title,
+            "planfix_task_id": request.planfix_task_id,
+            "enable_topics": enable_topics_eff,
+            "create_invite_link": create_link_eff,
+            "admins": list(request.admins),
+            "members": list(request.members),
+            "reserve_admins": list(reserve_admins_eff),
+            "reserve_members": list(reserve_members_eff),
+            "planned_members": planned_members,
+            "planned_admins": planned_admins,
+            "folder": folder_payload,
+        }
+        payload = {
+            "status": "dry_run",
+            "dry_run": True,
+            "command": "groups.create",
+            "would": (
+                f"create supergroup {request.title!r} with "
+                f"{len(planned_members)} member(s) and "
+                f"{len(planned_admins)} admin(s)"
+            ),
+            "resolved": resolved,
+            "planned_actions": planned_actions,
+            "warnings": warnings,
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, default=str))
+        return
 
     async def _run() -> dict[str, object]:
         try:
@@ -409,6 +559,11 @@ def topics_create(
         "--message",
         help="Optional first message text (overrides topic-name duplication).",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the request and report the plan without creating the topic.",
+    ),
     config_path: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -429,6 +584,7 @@ def topics_create(
         TopicCreateRequest,
         create_topic,
     )
+    from telegram_planfix_assistant.topics.service import _first_message
 
     if (chat_id is None) == (chat_name is None):
         typer.echo(
@@ -446,6 +602,90 @@ def topics_create(
     else:
         resolved_folder_name = folder_name
         effective_folder_id = folder_id
+
+    if dry_run:
+        if not topic_name.strip():
+            typer.echo("topic create requires non-empty topic_name", err=True)
+            raise typer.Exit(code=2)
+
+        async def _resolve() -> tuple[int, list]:
+            try:
+                topic_backend, folder_backend = await open_backends()
+                if chat_id is not None:
+                    resolved_chat_id = chat_id
+                else:
+                    resolved = await resolve_chat_in_folder(
+                        folder_backend,
+                        folder_name=resolved_folder_name or "",
+                        chat_name=chat_name or "",
+                        folder_id=effective_folder_id,
+                    )
+                    resolved_chat_id = resolved.chat_id
+                try:
+                    summaries = list(
+                        await topic_backend.list_topics(chat_id=resolved_chat_id)
+                    )
+                except Exception:
+                    summaries = []
+                return resolved_chat_id, summaries
+            finally:
+                try:
+                    await manager.disconnect()
+                except Exception:
+                    pass
+
+        try:
+            resolved_chat_id, summaries = asyncio.run(_resolve())
+        except FolderError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except Exception as exc:
+            typer.echo(f"topics create failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        existing = [t for t in summaries if t.title == topic_name]
+        existing_ids = [t.topic_id for t in existing]
+        request_preview = TopicCreateRequest(
+            telegram_chat_id=resolved_chat_id,
+            topic_name=topic_name,
+            planfix_task_id=planfix_task_id,
+            message=message,
+        )
+        kind, text = _first_message(request=request_preview)
+        warnings: list[str] = []
+        if existing:
+            warnings.append(
+                f"topic name {topic_name!r} already exists in chat {resolved_chat_id} "
+                f"(topic_ids={existing_ids}); real run will be idempotent and may replay"
+            )
+        planned_actions = [
+            f"create topic {topic_name!r} in chat {resolved_chat_id}",
+            f"send first message ({kind}): {text!r}",
+        ]
+        resolved_payload: dict[str, object] = {
+            "telegram_chat_id": resolved_chat_id,
+            "topic_name": topic_name,
+            "planfix_task_id": planfix_task_id,
+            "first_message_kind": kind,
+            "first_message_text": text,
+            "existing_topic_ids": existing_ids,
+        }
+        if chat_name is not None:
+            resolved_payload["chat_name"] = chat_name
+            resolved_payload["folder_name"] = resolved_folder_name
+        payload = {
+            "status": "dry_run",
+            "dry_run": True,
+            "command": "topics.create",
+            "would": (
+                f"create topic {topic_name!r} in chat {resolved_chat_id}"
+            ),
+            "resolved": resolved_payload,
+            "planned_actions": planned_actions,
+            "warnings": warnings,
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, default=str))
+        return
 
     async def _run() -> dict[str, object]:
         try:
@@ -595,6 +835,11 @@ def topics_bulk_create(
         "--continue-on-error/--stop-on-error",
         help="Continue the batch after a single-item failure (default true).",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the file and report the plan without creating topics.",
+    ),
     config_path: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -646,6 +891,116 @@ def topics_bulk_create(
     else:
         resolved_folder_name = folder_name
         effective_folder_id = folder_id
+
+    if dry_run:
+        async def _resolve_bulk() -> tuple[int, list]:
+            try:
+                topic_backend, folder_backend = await open_backends()
+                if chat_id is not None:
+                    resolved_chat_id = chat_id
+                else:
+                    resolved = await resolve_chat_in_folder(
+                        folder_backend,
+                        folder_name=resolved_folder_name or "",
+                        chat_name=chat_name or "",
+                        folder_id=effective_folder_id,
+                    )
+                    resolved_chat_id = resolved.chat_id
+                try:
+                    summaries = list(
+                        await topic_backend.list_topics(chat_id=resolved_chat_id)
+                    )
+                except Exception:
+                    summaries = []
+                return resolved_chat_id, summaries
+            finally:
+                try:
+                    await manager.disconnect()
+                except Exception:
+                    pass
+
+        try:
+            resolved_chat_id, summaries = asyncio.run(_resolve_bulk())
+        except FolderError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except Exception as exc:
+            typer.echo(f"topics bulk-create failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        existing_titles: dict[str, list[int]] = {}
+        for t in summaries:
+            existing_titles.setdefault(t.title, []).append(t.topic_id)
+
+        seen_names: dict[str, int] = {}
+        seen_task_ids: dict[str, int] = {}
+        items_out: list[dict[str, object]] = []
+        warnings: list[str] = []
+        for idx, it in enumerate(raw_items):
+            name = str(it["topic_name"])
+            task = it.get("planfix_task_id")
+            task_key = str(task) if task is not None else None
+            dup_in_file_name = name in seen_names
+            dup_in_file_task = (
+                task_key is not None and task_key in seen_task_ids
+            )
+            existing_ids = list(existing_titles.get(name, []))
+            row: dict[str, object] = {
+                "topic_name": name,
+                "planfix_task_id": task,
+                "message": it.get("message"),
+                "duplicate_topic_name_in_file": dup_in_file_name,
+                "duplicate_planfix_task_id_in_file": dup_in_file_task,
+                "existing_topic_ids": existing_ids,
+            }
+            if dup_in_file_name:
+                warnings.append(
+                    f"row {idx + 1}: duplicate topic_name {name!r} "
+                    f"(first at row {seen_names[name] + 1})"
+                )
+            if dup_in_file_task:
+                warnings.append(
+                    f"row {idx + 1}: duplicate planfix_task_id {task!r} "
+                    f"(first at row {seen_task_ids[task_key] + 1})"
+                )
+            if existing_ids:
+                warnings.append(
+                    f"row {idx + 1}: topic_name {name!r} already exists in chat "
+                    f"{resolved_chat_id} (topic_ids={existing_ids})"
+                )
+            items_out.append(row)
+            seen_names.setdefault(name, idx)
+            if task_key is not None:
+                seen_task_ids.setdefault(task_key, idx)
+
+        planned_actions = [
+            f"create topic {row['topic_name']!r} in chat {resolved_chat_id}"
+            for row in items_out
+        ]
+        resolved_payload: dict[str, object] = {
+            "telegram_chat_id": resolved_chat_id,
+            "items": items_out,
+            "items_count": len(items_out),
+            "file": str(file),
+            "operation_id": operation_id,
+            "continue_on_error": continue_on_error,
+        }
+        if chat_name is not None:
+            resolved_payload["chat_name"] = chat_name
+            resolved_payload["folder_name"] = resolved_folder_name
+        payload = {
+            "status": "dry_run",
+            "dry_run": True,
+            "command": "topics.bulk_create",
+            "would": (
+                f"create {len(items_out)} topic(s) in chat {resolved_chat_id}"
+            ),
+            "resolved": resolved_payload,
+            "planned_actions": planned_actions,
+            "warnings": warnings,
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, default=str))
+        return
 
     queue = WorkerQueue(
         store,
@@ -753,6 +1108,11 @@ def topics_close(
         "--reason",
         help="Optional human-readable reason; passed through to logs.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the request and report the plan without closing the topic.",
+    ),
     config_path: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -798,6 +1158,98 @@ def topics_close(
     else:
         resolved_folder_name = folder_name
         effective_folder_id = folder_id
+
+    if dry_run:
+        async def _resolve_close() -> tuple[int, int, bool, str | None]:
+            try:
+                topic_backend, folder_backend = await open_backends()
+                if chat_id is not None:
+                    resolved_chat_id = chat_id
+                else:
+                    resolved = await resolve_chat_in_folder(
+                        folder_backend,
+                        folder_name=resolved_folder_name or "",
+                        chat_name=chat_name or "",
+                        folder_id=effective_folder_id,
+                    )
+                    resolved_chat_id = resolved.chat_id
+
+                summaries = list(
+                    await topic_backend.list_topics(chat_id=resolved_chat_id)
+                )
+                if topic_id is not None:
+                    effective_topic_id = topic_id
+                    matches = [t for t in summaries if t.topic_id == topic_id]
+                    title = matches[0].title if matches else None
+                    if not matches:
+                        raise TopicNotFoundError(
+                            f"topic id {topic_id} not found in chat {resolved_chat_id}"
+                        )
+                else:
+                    effective_topic_id = await resolve_topic_id_by_name(
+                        backend=topic_backend,
+                        telegram_chat_id=resolved_chat_id,
+                        topic_name=topic_name or "",
+                    )
+                    title = topic_name
+                already_closed = any(
+                    t.topic_id == effective_topic_id and t.closed for t in summaries
+                )
+                return resolved_chat_id, effective_topic_id, already_closed, title
+            finally:
+                try:
+                    await manager.disconnect()
+                except Exception:
+                    pass
+
+        try:
+            (
+                resolved_chat_id,
+                effective_topic_id,
+                already_closed,
+                resolved_topic_title,
+            ) = asyncio.run(_resolve_close())
+        except (AmbiguousTopicNameError, TopicNotFoundError) as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except FolderError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except Exception as exc:
+            typer.echo(f"topics close failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        warnings: list[str] = []
+        if already_closed:
+            warnings.append(
+                f"topic {effective_topic_id} is already closed; real run will be a no-op replay"
+            )
+        resolved_payload: dict[str, object] = {
+            "telegram_chat_id": resolved_chat_id,
+            "telegram_topic_id": effective_topic_id,
+            "topic_name": resolved_topic_title,
+            "already_closed": already_closed,
+            "reason": reason,
+        }
+        if chat_name is not None:
+            resolved_payload["chat_name"] = chat_name
+            resolved_payload["folder_name"] = resolved_folder_name
+        planned_actions = [
+            f"close topic {effective_topic_id} in chat {resolved_chat_id} (history preserved)"
+        ]
+        payload = {
+            "status": "dry_run",
+            "dry_run": True,
+            "command": "topics.close",
+            "would": (
+                f"close topic {effective_topic_id} in chat {resolved_chat_id}"
+            ),
+            "resolved": resolved_payload,
+            "planned_actions": planned_actions,
+            "warnings": warnings,
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, default=str))
+        return
 
     async def _run() -> dict[str, object]:
         try:
