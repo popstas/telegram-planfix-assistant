@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -222,18 +223,43 @@ def create_app(
     if auto_constructed_manager and session_manager is not None:
         manager_ref = session_manager
 
+        async def _retry_connect_until_ready() -> None:
+            # Exponential backoff so a Telegram outage at startup self-heals
+            # without operator intervention. Without this, the cached client
+            # stays None and the Telegram routes return 503 until the process
+            # is restarted.
+            backoff = 1.0
+            while True:
+                try:
+                    await asyncio.sleep(backoff)
+                    await manager_ref.get_client()
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    backoff = min(backoff * 2, 60.0)
+
         @asynccontextmanager
         async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+            retry_task: asyncio.Task[None] | None = None
             try:
                 await manager_ref.get_client()
             except Exception:
                 # Service must still respond to /health when Telegram is
                 # unreachable or the session is unauthorized — the health
-                # probes will surface the real state.
-                pass
+                # probes will surface the real state. Spawn a background
+                # retry so the service recovers automatically once Telegram
+                # is reachable again.
+                retry_task = asyncio.create_task(_retry_connect_until_ready())
             try:
                 yield
             finally:
+                if retry_task is not None and not retry_task.done():
+                    retry_task.cancel()
+                    try:
+                        await retry_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
                 try:
                     await manager_ref.disconnect()
                 except Exception:

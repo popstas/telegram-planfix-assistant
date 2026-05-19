@@ -101,8 +101,13 @@ class TelethonSessionManager:
         if self._client is None:
             proxy = parse_proxy_url(self._config.proxy_url)
             factory_kwargs: dict = {"proxy": proxy} if proxy is not None else {}
+            session_path = str(Path(self._config.session_path).expanduser())
+            try:
+                Path(session_path).parent.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
             self._client = self._factory(
-                self._config.session_path,
+                session_path,
                 self._config.api_id,
                 self._config.api_hash,
                 **factory_kwargs,
