@@ -608,7 +608,7 @@ def topics_create(
             typer.echo("topic create requires non-empty topic_name", err=True)
             raise typer.Exit(code=2)
 
-        async def _resolve() -> tuple[int, list]:
+        async def _resolve() -> tuple[int, list, str | None]:
             try:
                 topic_backend, folder_backend = await open_backends()
                 if chat_id is not None:
@@ -621,13 +621,15 @@ def topics_create(
                         folder_id=effective_folder_id,
                     )
                     resolved_chat_id = resolved.chat_id
+                list_error: str | None = None
                 try:
                     summaries = list(
                         await topic_backend.list_topics(chat_id=resolved_chat_id)
                     )
-                except Exception:
+                except Exception as exc:
                     summaries = []
-                return resolved_chat_id, summaries
+                    list_error = str(exc) or type(exc).__name__
+                return resolved_chat_id, summaries, list_error
             finally:
                 try:
                     await manager.disconnect()
@@ -635,7 +637,7 @@ def topics_create(
                     pass
 
         try:
-            resolved_chat_id, summaries = asyncio.run(_resolve())
+            resolved_chat_id, summaries, list_error = asyncio.run(_resolve())
         except FolderError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=2) from exc
@@ -653,6 +655,11 @@ def topics_create(
         )
         kind, text = _first_message(request=request_preview)
         warnings: list[str] = []
+        if list_error is not None:
+            warnings.append(
+                f"could not list existing topics in chat {resolved_chat_id} "
+                f"({list_error}); duplicate detection skipped"
+            )
         if existing:
             warnings.append(
                 f"topic name {topic_name!r} already exists in chat {resolved_chat_id} "
@@ -893,7 +900,7 @@ def topics_bulk_create(
         effective_folder_id = folder_id
 
     if dry_run:
-        async def _resolve_bulk() -> tuple[int, list]:
+        async def _resolve_bulk() -> tuple[int, list, str | None]:
             try:
                 topic_backend, folder_backend = await open_backends()
                 if chat_id is not None:
@@ -906,13 +913,15 @@ def topics_bulk_create(
                         folder_id=effective_folder_id,
                     )
                     resolved_chat_id = resolved.chat_id
+                list_error: str | None = None
                 try:
                     summaries = list(
                         await topic_backend.list_topics(chat_id=resolved_chat_id)
                     )
-                except Exception:
+                except Exception as exc:
                     summaries = []
-                return resolved_chat_id, summaries
+                    list_error = str(exc) or type(exc).__name__
+                return resolved_chat_id, summaries, list_error
             finally:
                 try:
                     await manager.disconnect()
@@ -920,7 +929,7 @@ def topics_bulk_create(
                     pass
 
         try:
-            resolved_chat_id, summaries = asyncio.run(_resolve_bulk())
+            resolved_chat_id, summaries, list_error = asyncio.run(_resolve_bulk())
         except FolderError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=2) from exc
@@ -936,6 +945,11 @@ def topics_bulk_create(
         seen_task_ids: dict[str, int] = {}
         items_out: list[dict[str, object]] = []
         warnings: list[str] = []
+        if list_error is not None:
+            warnings.append(
+                f"could not list existing topics in chat {resolved_chat_id} "
+                f"({list_error}); duplicate detection skipped"
+            )
         for idx, it in enumerate(raw_items):
             name = str(it["topic_name"])
             task = it.get("planfix_task_id")
