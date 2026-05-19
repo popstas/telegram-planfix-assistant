@@ -5,6 +5,7 @@
 
 ### Features
 
+- config: Add topics_layout default to TelegramDefaults
 - telegram: Add proxy_url config option
 - config: Add ~/.config fallback and bootstrap
 - Verify acceptance criteria for telegram skill and dry-run

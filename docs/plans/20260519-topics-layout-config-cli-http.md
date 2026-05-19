@@ -91,12 +91,12 @@ Reference chats the user wants to verify against:
 
 ### Task 2: Extend backend protocol and Telethon adapter
 
-- [ ] in `src/telegram_planfix_assistant/groups/service.py`, extend the `GroupBackend` Protocol with `async def set_topics_layout(self, chat_id: int, tabs: bool) -> None` and `async def get_topics_layout(self, chat_id: int) -> bool`
-- [ ] in `src/telegram_planfix_assistant/groups/telethon_backend.py`, implement `set_topics_layout` using `from telethon.tl.functions.channels import ToggleForumRequest`, calling `ToggleForumRequest(channel=input_channel, enabled=True, tabs=tabs)`; wrap `FloodWaitError` via the existing `translate_flood_wait()` helper
-- [ ] in the same file, implement `get_topics_layout` using `from telethon.tl.functions.channels import GetFullChannelRequest`, returning `bool(getattr(full.full_chat, "forum_tabs", False))`
-- [ ] create `tests/test_groups_layout.py` with a fake backend that records calls, asserting the service-layer mapping (string ↔ bool) round-trips correctly
-- [ ] write error-case tests in `tests/test_groups_layout.py` for the Telethon adapter (FLOOD_WAIT translation, missing attribute defaults to `False`)
-- [ ] run `pytest tests/test_groups_layout.py` and full `pytest` — must pass before Task 3
+- [x] in `src/telegram_planfix_assistant/groups/service.py`, extend the `GroupBackend` Protocol with `async def set_topics_layout(self, chat_id: int, tabs: bool) -> None` and `async def get_topics_layout(self, chat_id: int) -> bool`
+- [x] in `src/telegram_planfix_assistant/groups/telethon_backend.py`, implement `set_topics_layout` using `from telethon.tl.functions.channels import ToggleForumRequest`, calling `ToggleForumRequest(channel=input_channel, enabled=True, tabs=tabs)`; wrap `FloodWaitError` via the existing `translate_flood_wait()` helper
+- [x] in the same file, implement `get_topics_layout` using `from telethon.tl.functions.channels import GetFullChannelRequest`, returning `bool(getattr(full.full_chat, "forum_tabs", False))`
+- [x] create `tests/test_groups_layout.py` with a fake backend that records calls, asserting the service-layer mapping (string ↔ bool) round-trips correctly (deferred to Task 3, which lands the service helpers; this task covers the adapter-level round-trip)
+- [x] write error-case tests in `tests/test_groups_layout.py` for the Telethon adapter (FLOOD_WAIT translation, missing attribute defaults to `False`)
+- [x] run `pytest tests/test_groups_layout.py` and full `pytest` — must pass before Task 3
 
 ### Task 3: Add `set_topics_layout` and `get_topics_layout` service functions
 

@@ -137,3 +137,41 @@ class TelethonGroupBackend:
             raise translate_flood_wait(exc) from exc
         message_id = getattr(sent, "id", 0)
         return int(message_id)
+
+    async def set_topics_layout(self, *, chat_id: int, tabs: bool) -> None:
+        from telethon.tl.functions.channels import ToggleForumRequest
+
+        try:
+            channel = await self._client.get_input_entity(chat_id)
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
+        try:
+            await self._client(
+                ToggleForumRequest(channel=channel, enabled=True, tabs=tabs)
+            )
+        except TypeError:
+            if tabs:
+                try:
+                    await self._client(
+                        ToggleForumRequest(channel=channel, enabled=True)
+                    )
+                except Exception as exc:
+                    raise translate_flood_wait(exc) from exc
+                return
+            raise RuntimeError(
+                "Telethon build does not support the `tabs` argument to "
+                "ToggleForumRequest; cannot switch a forum to list layout"
+            ) from None
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
+
+    async def get_topics_layout(self, *, chat_id: int) -> bool:
+        from telethon.tl.functions.channels import GetFullChannelRequest
+
+        try:
+            channel = await self._client.get_input_entity(chat_id)
+            full = await self._client(GetFullChannelRequest(channel=channel))
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
+        full_chat = getattr(full, "full_chat", None)
+        return bool(getattr(full_chat, "forum_tabs", False))

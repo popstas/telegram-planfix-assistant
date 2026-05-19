@@ -172,6 +172,12 @@ class GroupBackend(Protocol):
     async def send_message(self, *, chat_id: int, text: str) -> int:
         ...
 
+    async def set_topics_layout(self, *, chat_id: int, tabs: bool) -> None:
+        ...
+
+    async def get_topics_layout(self, *, chat_id: int) -> bool:
+        ...
+
 
 def _resolved_reserves(
     explicit: Sequence[str] | None,
