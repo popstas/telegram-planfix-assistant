@@ -46,6 +46,7 @@
 
 ### Bug Fixes
 
+- Read forum_tabs from Channel constructor, not ChannelFull
 - Address codex review findings
 - review: Propagate FLOOD_WAIT through layout calls and document topics_layout
 - Address codex review findings
