@@ -340,6 +340,9 @@ def groups_create(
             )
             raise typer.Exit(code=2)
 
+        effective_title = (
+            f"{request.title}{config.telegram.defaults.group_title_postfix}"
+        )
         enable_topics_eff = (
             request.enable_topics
             if request.enable_topics is not None
@@ -417,7 +420,7 @@ def groups_create(
             warnings.append("--skip-folder: new group will not be placed into any folder")
 
         planned_actions: list[str] = [
-            f"create supergroup title={request.title!r} enable_topics={enable_topics_eff}",
+            f"create supergroup title={effective_title!r} enable_topics={enable_topics_eff}",
         ]
         for u in planned_members:
             planned_actions.append(f"add member {u}")
@@ -441,6 +444,7 @@ def groups_create(
 
         resolved: dict[str, object] = {
             "title": request.title,
+            "effective_title": effective_title,
             "planfix_task_id": request.planfix_task_id,
             "enable_topics": enable_topics_eff,
             "create_invite_link": create_link_eff,
@@ -457,7 +461,7 @@ def groups_create(
             "dry_run": True,
             "command": "groups.create",
             "would": (
-                f"create supergroup {request.title!r} with "
+                f"create supergroup {effective_title!r} with "
                 f"{len(planned_members)} member(s) and "
                 f"{len(planned_admins)} admin(s)"
             ),
