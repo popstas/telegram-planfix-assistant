@@ -44,6 +44,7 @@
 
 ### Bug Fixes
 
+- review: Classify chat_exists errors by type, fix tautological test
 - Address codex review findings
 - Address code review findings
 - review: Unblock bulk-remove --dry-run for protected accounts
