@@ -35,7 +35,7 @@ Top-level:
 
 `groups` — manage Telegram supergroups:
 
-- `groups create` — create a Telegram supergroup for a Planfix client.
+- `groups create` — create a Telegram supergroup for a Planfix client. Accepts `--topics-layout list|tabs` to pick the forum layout for this group (defaults to `telegram.defaults.topics_layout`).
 - `groups set-layout` — set the topics layout (`list` vs `tabs`) for an existing forum chat.
 - `groups get-layout` — read the current topics layout (`list` or `tabs`) for a forum chat.
 
@@ -88,10 +88,22 @@ telegram:
   defaults:
     enable_topics: true
     create_invite_link: true
-    topics_layout: "list"   # "list" | "tabs" — applied after groups create
+    topics_layout: "list"        # "list" | "tabs" — applied after groups create
+    group_title_postfix: ""      # appended to the Telegram chat title at creation
+    cleanup_service_messages: true   # delete welcome / /task / bot-reply after creation
+    task_reply_wait_seconds: 5       # how long to poll for @planfix_bot's /task reply
+    default_member_permissions:
+      create_topics: true        # let ordinary members create forum topics
+      pin_messages: true         # let ordinary members pin messages
 ```
 
-`topics_layout` controls how the forum opens after `groups create`: `"list"` shows topics as a vertical list (Telegram's default), `"tabs"` shows them as horizontal tabs. The CLI `groups set-layout --layout` flag and the `POST /telegram/groups/layout` body override the default per call.
+`topics_layout` controls how the forum opens after `groups create`: `"list"` shows topics as a vertical list (Telegram's default), `"tabs"` shows them as horizontal tabs. The CLI `groups create --topics-layout` and `groups set-layout --layout` flags, and the `POST /telegram/groups` / `POST /telegram/groups/layout` bodies (`topics_layout`), override the default per call.
+
+`group_title_postfix` is appended to the Telegram chat title at creation time (e.g. a shared suffix Planfix scenarios would otherwise add). It is deliberately kept out of the idempotency key, so a Planfix replay still matches on the raw title.
+
+`default_member_permissions` sets the new group's default banned rights so ordinary members can `create_topics` and `pin_messages`. Other default rights are left untouched.
+
+`cleanup_service_messages` (default `true`) deletes @planfix_bot's welcome message, the `/task <id>` service command, and the bot's reply to it after the group is populated, so the chat starts clean. `task_reply_wait_seconds` is how long the worker polls for the bot's reply before deleting only the welcome + command. All cleanup is best-effort: failures are recorded in the operation's `skipped` list and never fail the create.
 
 See `docs/plans/20260518-telegram-planfix-assistant-mvp.md` for the full configuration schema and feature scope.
 

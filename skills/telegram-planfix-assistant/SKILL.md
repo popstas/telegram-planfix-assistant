@@ -224,16 +224,27 @@ messages the agent must surface verbatim instead of paraphrasing.
 #### `groups` / `create`
 
 - Extract: `--title` (or `--planfix-task-id`), `--admin` and `--member`
-  lists, optional `--about`.
+  lists, optional `--about`, optional `--topics-layout` (`list` or
+  `tabs`) when the human names how topics should open.
 - Required flags: at least one of `--title` or `--planfix-task-id`.
 - From config: `--folder-name` defaults to
   `telegram.default_chat_folder.folder_name`; reserve admins/members
-  come from `telegram.reserve_admins` / `telegram.reserve_members`.
+  come from `telegram.reserve_admins` / `telegram.reserve_members`;
+  `--topics-layout` defaults to `telegram.defaults.topics_layout`. The
+  effective Telegram title also gets `telegram.defaults.group_title_postfix`
+  appended (the idempotency key stays on the raw title), members get
+  `telegram.defaults.default_member_permissions` (create topics / pin
+  messages), and `telegram.defaults.cleanup_service_messages` removes
+  @planfix_bot's welcome, the `/task` command, and the bot's reply after
+  creation — surface the effective title in the plan so the postfix is
+  visible.
 - Temp file: no — admins and members go on the command line as repeated
   `--admin @employee_username` / `--member @member_username` flags.
 - Automation: include `--planfix-task-id` when the human gives one; the
   dry-run plan must show whether `@planfix_bot` is among planned
-  members so the `/task <id>` service message will actually fire.
+  members so the `/task <id>` service message will actually fire, the
+  `effective_title` (raw title + postfix), and the resolved
+  `topics_layout`.
 - Confirmation: required after dry-run.
 - Typical errors: `group create requires planfix_task_id or non-empty
   title`, folder errors from `resolve_folder`, `GroupCreateFailed`,
@@ -439,7 +450,8 @@ Request: «Создай группу для клиента Клиент / про
 2. Extracted: title `Клиент / проект`, `--planfix-task-id 123456`,
    `--admin @manager_username`, `--member @employee_username`,
    `--member @member_username`. Folder defaults to the configured
-   `Planfix clients`.
+   `Planfix clients`. Add `--topics-layout tabs` only if the human asks
+   for tabs; otherwise the configured `topics_layout` default applies.
 3. Run `telegram-planfix-assistant health` if not yet done.
 4. Dry-run:
 
@@ -453,11 +465,13 @@ Request: «Создай группу для клиента Клиент / про
      --dry-run
    ```
 
-5. Show plan: title, folder (`Planfix clients`), admins, members,
-   reserve accounts from `resolved`, and `planned_actions` (create
-   group, add each member, promote each admin, create invite link,
-   place into folder, send `/task 123456` if `@planfix_bot` is in
-   planned members).
+5. Show plan: title and `effective_title` (raw title + configured
+   postfix), folder (`Planfix clients`), resolved `topics_layout`,
+   admins, members, reserve accounts from `resolved`, and
+   `planned_actions` (create group, set default member permissions,
+   set topics layout, add each member, promote each admin, create
+   invite link, place into folder, send `/task 123456` if
+   `@planfix_bot` is in planned members, clean up service messages).
 6. Wait for «да» / «выполни». Re-run the same command without
    `--dry-run`.
 

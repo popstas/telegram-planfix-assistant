@@ -128,6 +128,6 @@ The seven fixes:
 
 ### Task 8: Update documentation
 
-- [ ] Update `skills/telegram-planfix-assistant/SKILL.md` for the new `groups create` options/HTTP fields and re-sync to `~/.claude/skills/telegram-planfix-assistant/SKILL.md` (satisfies `tests/test_skill_inventory.py`).
-- [ ] Update the Commands section in `README.md`.
-- [ ] Update `CLAUDE.md` Config section if new config knobs change documented behavior.
+- [x] Update `skills/telegram-planfix-assistant/SKILL.md` for the new `groups create` options/HTTP fields and re-sync to `~/.claude/skills/telegram-planfix-assistant/SKILL.md` (satisfies `tests/test_skill_inventory.py`).
+- [x] Update the Commands section in `README.md`.
+- [x] Update `CLAUDE.md` Config section if new config knobs change documented behavior.
