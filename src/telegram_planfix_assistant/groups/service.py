@@ -12,6 +12,7 @@ a completed call returns the saved result without touching Telegram.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -35,6 +36,9 @@ from telegram_planfix_assistant.worker.queue import FloodWaitError
 logger = logging.getLogger(__name__)
 
 PLANFIX_BOT_USERNAME = "@planfix_bot"
+
+# How often to poll for @planfix_bot's reply during service-message cleanup.
+_TASK_REPLY_POLL_INTERVAL = 1.0
 
 
 class GroupError(RuntimeError):
@@ -218,6 +222,21 @@ class GroupBackend(Protocol):
         chat_id: int,
         allow_create_topics: bool,
         allow_pin_messages: bool,
+    ) -> None:
+        ...
+
+    async def get_recent_messages(
+        self, *, chat_id: int, limit: int
+    ) -> list[dict[str, Any]]:
+        """Return up to ``limit`` recent messages, newest first.
+
+        Each entry is ``{"id", "sender_username", "reply_to_msg_id", "text"}``;
+        ``sender_username`` and ``reply_to_msg_id`` may be ``None``.
+        """
+        ...
+
+    async def delete_messages(
+        self, *, chat_id: int, message_ids: Sequence[int]
     ) -> None:
         ...
 
@@ -446,6 +465,7 @@ async def _execute_create(
         folder_name = snapshot.folder_name
 
     task_message_sent = False
+    task_message_id: int | None = None
     if request.planfix_task_id is not None:
         bot_in_group = any(
             u.lstrip("@").lower() == PLANFIX_BOT_USERNAME.lstrip("@").lower()
@@ -453,7 +473,7 @@ async def _execute_create(
         )
         if bot_in_group:
             try:
-                await backend.send_message(
+                task_message_id = await backend.send_message(
                     chat_id=chat_id, text=f"/task {request.planfix_task_id}"
                 )
                 task_message_sent = True
@@ -461,6 +481,24 @@ async def _execute_create(
                 skipped.append(
                     {"step": "task_message", "reason": str(exc)}
                 )
+
+    # Best-effort cleanup of the chat's service noise: @planfix_bot's welcome
+    # message, our `/task` command, and the bot's reply to it. Only runs when
+    # the command actually went out (bot present) and the operator hasn't
+    # disabled it. Any failure is recorded in `skipped` and never fails the
+    # create — the chat already exists and this is purely cosmetic.
+    if (
+        config.defaults.cleanup_service_messages
+        and task_message_sent
+        and task_message_id is not None
+    ):
+        await _cleanup_service_messages(
+            backend=backend,
+            chat_id=chat_id,
+            task_message_id=task_message_id,
+            wait_seconds=config.defaults.task_reply_wait_seconds,
+            skipped=skipped,
+        )
 
     return GroupCreateResult(
         telegram_chat_id=chat_id,
@@ -476,6 +514,88 @@ async def _execute_create(
         skipped=skipped,
         task_message_sent=task_message_sent,
     )
+
+
+async def _cleanup_service_messages(
+    *,
+    backend: GroupBackend,
+    chat_id: int,
+    task_message_id: int,
+    wait_seconds: int,
+    skipped: list[dict[str, Any]],
+) -> None:
+    """Delete @planfix_bot's welcome message, our `/task` command, and the
+    bot's reply to it.
+
+    Polls ``get_recent_messages`` up to ``wait_seconds`` for the bot reply
+    (a bot message replying to ``task_message_id``). Whether or not the reply
+    arrives, the welcome message and the command are still deleted; a missing
+    reply is recorded in ``skipped`` rather than failing the create. Every
+    backend error here (including a throttle) is best-effort: the chat already
+    exists and cleanup is cosmetic.
+    """
+    bot_handle = PLANFIX_BOT_USERNAME.lstrip("@").lower()
+
+    def _is_bot(msg: dict[str, Any]) -> bool:
+        sender = str(msg.get("sender_username") or "").lstrip("@").lower()
+        return sender == bot_handle
+
+    messages: list[dict[str, Any]] = []
+    reply_id: int | None = None
+    elapsed = 0.0
+    while True:
+        try:
+            messages = list(
+                await backend.get_recent_messages(chat_id=chat_id, limit=20)
+            )
+        except Exception as exc:
+            skipped.append({"step": "cleanup_get_messages", "reason": str(exc)})
+            return
+        reply = next(
+            (
+                m
+                for m in messages
+                if _is_bot(m) and m.get("reply_to_msg_id") == task_message_id
+            ),
+            None,
+        )
+        if reply is not None:
+            reply_id = int(reply["id"])
+            break
+        if elapsed >= wait_seconds:
+            break
+        await asyncio.sleep(_TASK_REPLY_POLL_INTERVAL)
+        elapsed += _TASK_REPLY_POLL_INTERVAL
+
+    if reply_id is None:
+        skipped.append(
+            {
+                "step": "cleanup_bot_reply",
+                "reason": "bot reply did not arrive within wait window",
+            }
+        )
+
+    # The welcome message is any bot message that is not the reply we just
+    # matched. Collect those, then the command, then the reply — deduped.
+    to_delete: list[int] = [
+        int(m["id"]) for m in messages if _is_bot(m) and int(m["id"]) != reply_id
+    ]
+    to_delete.append(task_message_id)
+    if reply_id is not None:
+        to_delete.append(reply_id)
+
+    seen: set[int] = set()
+    unique: list[int] = []
+    for mid in to_delete:
+        if mid in seen:
+            continue
+        seen.add(mid)
+        unique.append(mid)
+
+    try:
+        await backend.delete_messages(chat_id=chat_id, message_ids=unique)
+    except Exception as exc:
+        skipped.append({"step": "cleanup_delete", "reason": str(exc)})
 
 
 async def create_group(

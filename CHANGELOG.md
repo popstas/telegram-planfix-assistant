@@ -5,6 +5,7 @@
 
 ### Features
 
+- Verify chat existence before replaying group_create
 - Tolerate blank user references in group create and bulk add
 - Default group permissions for create_topics and pin_messages
 - Per-request topics_layout on group creation

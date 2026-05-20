@@ -42,6 +42,12 @@ class TelegramDefaults(BaseModel):
     default_member_permissions: DefaultMemberPermissions = Field(
         default_factory=DefaultMemberPermissions
     )
+    # After creation, delete @planfix_bot's welcome message, our `/task <id>`
+    # command, and the bot's reply to it so the new chat starts clean.
+    cleanup_service_messages: bool = True
+    # How long to poll for @planfix_bot's reply to the `/task` command before
+    # giving up and deleting only the welcome + command messages.
+    task_reply_wait_seconds: int = Field(default=5, ge=0)
 
 
 class TelegramConfig(BaseModel):

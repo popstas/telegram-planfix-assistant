@@ -27,6 +27,7 @@ def minimal_config_yaml() -> str:
           defaults:
             enable_topics: true
             create_invite_link: true
+            task_reply_wait_seconds: 0
 
         http:
           host: "0.0.0.0"
