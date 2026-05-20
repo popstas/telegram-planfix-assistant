@@ -528,8 +528,9 @@ async def test_create_group_skips_blank_member_references(
     assert result.members_added == ["@bob", "@carol", "@alice"]
     assert result.admins_promoted == ["@alice"]
     assert backend.added == ["@bob", "@carol", "@alice"]
-    # Blanks never produced an add_member call or a skipped entry.
-    assert all("" != s.get("user", "x").strip() for s in result.skipped)
+    # Blanks are dropped before reaching the backend, so they never produce a
+    # skipped entry.
+    assert result.skipped == []
 
 
 async def test_create_group_failure_records_failed(
