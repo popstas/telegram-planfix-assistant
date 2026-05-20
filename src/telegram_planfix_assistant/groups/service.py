@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 PLANFIX_BOT_USERNAME = "@planfix_bot"
 
-# How often to poll for @planfix_bot's reply during service-message cleanup.
+# How often to poll for @planfix_bot's reply during Planfix-message cleanup.
 _TASK_REPLY_POLL_INTERVAL = 1.0
 
 
@@ -488,11 +488,11 @@ async def _execute_create(
     # disabled it. Any failure is recorded in `skipped` and never fails the
     # create — the chat already exists and this is purely cosmetic.
     if (
-        config.defaults.cleanup_service_messages
+        config.defaults.cleanup_planfix_messages
         and task_message_sent
         and task_message_id is not None
     ):
-        await _cleanup_service_messages(
+        await _cleanup_planfix_messages(
             backend=backend,
             chat_id=chat_id,
             task_message_id=task_message_id,
@@ -516,7 +516,7 @@ async def _execute_create(
     )
 
 
-async def _cleanup_service_messages(
+async def _cleanup_planfix_messages(
     *,
     backend: GroupBackend,
     chat_id: int,
