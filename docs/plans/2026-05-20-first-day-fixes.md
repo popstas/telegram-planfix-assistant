@@ -88,10 +88,10 @@ The seven fixes:
 - Modify: `src/telegram_planfix_assistant/groups/service.py` (population step)
 - Modify: `src/telegram_planfix_assistant/members/service.py` (bulk add)
 
-- [ ] Add a small helper to drop blank/whitespace-only user references; apply it to `members`/`admins`/reserves before the dedupe/population loop in `_execute_create`.
-- [ ] In `bulk_add_members`, filter blank items before `normalize_user_ref` so a stray empty string no longer raises and aborts the whole batch (blanks are dropped from the run).
-- [ ] Write tests: group create with an empty-string member still succeeds and skips the blank; bulk add with a blank entry processes the rest normally.
-- [ ] Run `pytest` — must pass before Task 5.
+- [x] Add a small helper to drop blank/whitespace-only user references; apply it to `members`/`admins`/reserves before the dedupe/population loop in `_execute_create`.
+- [x] In `bulk_add_members`, filter blank items before `normalize_user_ref` so a stray empty string no longer raises and aborts the whole batch (blanks are dropped from the run).
+- [x] Write tests: group create with an empty-string member still succeeds and skips the blank; bulk add with a blank entry processes the rest normally.
+- [x] Run `pytest` — must pass before Task 5.
 
 ### Task 5: Verify real chat existence before replaying group_create (fix 3)
 

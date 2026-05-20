@@ -187,6 +187,49 @@ async def test_bulk_add_happy_path_adds_and_promotes(
     assert result.items[0].promoted is False
 
 
+async def test_bulk_add_drops_blank_entries(
+    store: OperationStore,
+) -> None:
+    backend = FakeMemberBackend()
+    queue = _make_queue(store)
+    # A stray empty string and a whitespace-only entry must be dropped before
+    # normalization so the rest of the batch still runs.
+    req = BulkMemberAddRequest(
+        telegram_chat_id=-100,
+        items=(
+            BulkMemberItem(user="@alice"),
+            BulkMemberItem(user=""),
+            BulkMemberItem(user="   "),
+            BulkMemberItem(user="@bob"),
+        ),
+        operation_id="op-blanks",
+    )
+    result, op = await bulk_add_members(
+        backend=backend, store=store, queue=queue, request=req
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.added == 2
+    assert backend.added == [(-100, "@alice"), (-100, "@bob")]
+    assert [it.user for it in result.items] == ["@alice", "@bob"]
+
+
+async def test_bulk_add_all_blank_entries_raises(
+    store: OperationStore,
+) -> None:
+    backend = FakeMemberBackend()
+    queue = _make_queue(store)
+    req = BulkMemberAddRequest(
+        telegram_chat_id=-100,
+        items=(BulkMemberItem(user=""), BulkMemberItem(user="   ")),
+        operation_id="op-allblank",
+    )
+    with pytest.raises(ValueError, match="non-blank"):
+        await bulk_add_members(
+            backend=backend, store=store, queue=queue, request=req
+        )
+
+
 async def test_bulk_add_privacy_keeps_running_when_continue_on_error_true(
     store: OperationStore,
 ) -> None:
