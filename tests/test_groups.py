@@ -49,18 +49,21 @@ class FakeGroupBackend:
         fail_on_promote: set[str] | None = None,
         invite_link: str | None = "https://t.me/+invitehash",
         set_layout_error: Exception | None = None,
+        set_permissions_error: Exception | None = None,
     ) -> None:
         self._chat_id = chat_id
         self._fail_on_add = fail_on_add or set()
         self._fail_on_promote = fail_on_promote or set()
         self._invite_link = invite_link
         self._set_layout_error = set_layout_error
+        self._set_permissions_error = set_permissions_error
         self.created: list[dict[str, Any]] = []
         self.added: list[str] = []
         self.promoted: list[str] = []
         self.messages: list[tuple[int, str]] = []
         self.invite_calls = 0
         self.layout_calls: list[tuple[int, bool]] = []
+        self.permission_calls: list[tuple[int, bool, bool]] = []
         self.current_tabs: bool = False
 
     async def create_supergroup(
@@ -103,6 +106,19 @@ class FakeGroupBackend:
 
     async def get_topics_layout(self, *, chat_id: int) -> bool:
         return self.current_tabs
+
+    async def set_default_permissions(
+        self,
+        *,
+        chat_id: int,
+        allow_create_topics: bool,
+        allow_pin_messages: bool,
+    ) -> None:
+        if self._set_permissions_error is not None:
+            raise self._set_permissions_error
+        self.permission_calls.append(
+            (chat_id, allow_create_topics, allow_pin_messages)
+        )
 
 
 class FakeFolderBackend:
@@ -685,6 +701,97 @@ async def test_create_group_layout_flood_wait_promotes_to_needs_review(
     )
     folder_backend = FakeFolderBackend()
     request = GroupCreateRequest(title="Acme", planfix_task_id=5, skip_reserve=True)
+
+    with pytest.raises(GroupCreateNeedsReview):
+        await create_group(
+            backend=backend,
+            folder_backend=folder_backend,
+            store=store,
+            config=config.telegram,
+            request=request,
+        )
+
+
+async def test_create_group_sets_default_permissions(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    backend = FakeGroupBackend()
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=1, skip_reserve=True)
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    # Defaults grant create_topics and pin_messages to everyone.
+    assert backend.permission_calls == [(-100123, True, True)]
+
+
+async def test_create_group_respects_configured_permissions(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    config.telegram.defaults.default_member_permissions.create_topics = False
+    config.telegram.defaults.default_member_permissions.pin_messages = True
+    backend = FakeGroupBackend()
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=2, skip_reserve=True)
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert backend.permission_calls == [(-100123, False, True)]
+
+
+async def test_create_group_permissions_failure_recorded_in_skipped(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    backend = FakeGroupBackend(
+        set_permissions_error=RuntimeError("cannot edit default rights"),
+    )
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=3, skip_reserve=True)
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    # The create still succeeds; the permission failure lands in skipped.
+    assert op.status is OperationStatus.COMPLETED
+    assert backend.permission_calls == []
+    perm_skips = [s for s in result.skipped if s["step"] == "set_default_permissions"]
+    assert perm_skips, "expected the permission failure to be recorded in skipped"
+    assert "cannot edit default rights" in perm_skips[0]["reason"]
+
+
+async def test_create_group_permissions_flood_wait_promotes_to_needs_review(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    from telegram_planfix_assistant.worker.queue import FloodWaitError
+
+    config = _config(minimal_config_yaml)
+    backend = FakeGroupBackend(
+        set_permissions_error=FloodWaitError(seconds=30),
+    )
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=4, skip_reserve=True)
 
     with pytest.raises(GroupCreateNeedsReview):
         await create_group(

@@ -165,6 +165,37 @@ class TelethonGroupBackend:
         except Exception as exc:
             raise translate_flood_wait(exc) from exc
 
+    async def set_default_permissions(
+        self,
+        *,
+        chat_id: int,
+        allow_create_topics: bool,
+        allow_pin_messages: bool,
+    ) -> None:
+        from telethon.tl.functions.messages import (
+            EditChatDefaultBannedRightsRequest,
+        )
+        from telethon.tl.types import ChatBannedRights
+
+        try:
+            channel = await self._client.get_input_entity(chat_id)
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
+        # An allowed action maps to a *cleared* banned-rights flag. We only
+        # touch the two flags we manage and leave every other default right at
+        # its standard (unbanned) value.
+        rights = ChatBannedRights(
+            until_date=None,
+            manage_topics=not allow_create_topics,
+            pin_messages=not allow_pin_messages,
+        )
+        try:
+            await self._client(
+                EditChatDefaultBannedRightsRequest(peer=channel, banned_rights=rights)
+            )
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
+
     async def get_topics_layout(self, *, chat_id: int) -> bool:
         from telethon.tl.functions.channels import GetFullChannelRequest
 

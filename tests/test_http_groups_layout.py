@@ -67,6 +67,15 @@ class FakeLayoutBackend:
             raise self._get_error
         return self.forum_tabs
 
+    async def set_default_permissions(
+        self,
+        *,
+        chat_id: int,
+        allow_create_topics: bool,
+        allow_pin_messages: bool,
+    ) -> None:
+        raise NotImplementedError
+
 
 def _make_store() -> OperationStore:
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")

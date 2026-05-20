@@ -209,6 +209,15 @@ class GroupBackend(Protocol):
     async def get_topics_layout(self, *, chat_id: int) -> bool:
         ...
 
+    async def set_default_permissions(
+        self,
+        *,
+        chat_id: int,
+        allow_create_topics: bool,
+        allow_pin_messages: bool,
+    ) -> None:
+        ...
+
 
 def _resolved_reserves(
     explicit: Sequence[str] | None,
@@ -269,6 +278,31 @@ async def _execute_create(
         enable_topics=enable_topics,
     )
 
+    skipped: list[dict[str, Any]] = []
+
+    # Open up default member permissions right after creation so ordinary
+    # members can create topics and pin messages. Best-effort: a FLOOD_WAIT
+    # still surfaces as needs_review, but any other failure must not abort the
+    # create (the chat already exists).
+    perms = config.defaults.default_member_permissions
+    try:
+        await backend.set_default_permissions(
+            chat_id=chat_id,
+            allow_create_topics=perms.create_topics,
+            allow_pin_messages=perms.pin_messages,
+        )
+    except FloodWaitError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "post-create set_default_permissions failed for chat %s: %s",
+            chat_id,
+            exc,
+        )
+        skipped.append(
+            {"step": "set_default_permissions", "reason": str(exc)}
+        )
+
     if enable_topics:
         layout = request.topics_layout or config.defaults.topics_layout
         try:
@@ -308,7 +342,6 @@ async def _execute_create(
         [*request.members, *reserve_members, *request.admins, *reserve_admins]
     )
     members_added: list[str] = []
-    skipped: list[dict[str, Any]] = []
     for user in all_members:
         try:
             await backend.add_member(chat_id=chat_id, user=user)

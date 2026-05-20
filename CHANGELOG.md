@@ -5,6 +5,7 @@
 
 ### Features
 
+- Per-request topics_layout on group creation
 - Configurable chat-title postfix on group creation
 - observability: Quiet Telethon health-check noise
 - Configurable topics layout (list/tabs) across config, CLI, and HTTP (#4)

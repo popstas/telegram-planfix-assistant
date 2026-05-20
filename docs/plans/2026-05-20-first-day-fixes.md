@@ -76,11 +76,11 @@ The seven fixes:
 - Modify: `src/telegram_planfix_assistant/groups/service.py` (protocol + `_execute_create`)
 - Modify: `src/telegram_planfix_assistant/groups/telethon_backend.py`
 
-- [ ] Add config knob (e.g. `default_member_permissions: {create_topics: bool = True, pin_messages: bool = True}`) under `TelegramConfig`/`TelegramDefaults`.
-- [ ] Add `set_default_permissions(*, chat_id, allow_create_topics, allow_pin_messages)` to the `GroupBackend` protocol; implement in `TelethonGroupBackend` via `EditChatDefaultBannedRights` (allowed flags map to `manage_topics=False`/`pin_messages=False` in the default banned rights, leaving other defaults intact).
-- [ ] Call it in `_execute_create` right after `create_supergroup`; best-effort (FLOOD_WAIT re-raises like other calls, other errors append to `skipped[]`).
-- [ ] Write tests with a fake backend: permissions verb invoked with expected flags; failure recorded in `skipped` without failing the create; FLOOD_WAIT propagates to `needs_review`.
-- [ ] Run `pytest` — must pass before Task 4.
+- [x] Add config knob (e.g. `default_member_permissions: {create_topics: bool = True, pin_messages: bool = True}`) under `TelegramConfig`/`TelegramDefaults`.
+- [x] Add `set_default_permissions(*, chat_id, allow_create_topics, allow_pin_messages)` to the `GroupBackend` protocol; implement in `TelethonGroupBackend` via `EditChatDefaultBannedRights` (allowed flags map to `manage_topics=False`/`pin_messages=False` in the default banned rights, leaving other defaults intact).
+- [x] Call it in `_execute_create` right after `create_supergroup`; best-effort (FLOOD_WAIT re-raises like other calls, other errors append to `skipped[]`).
+- [x] Write tests with a fake backend: permissions verb invoked with expected flags; failure recorded in `skipped` without failing the create; FLOOD_WAIT propagates to `needs_review`.
+- [x] Run `pytest` — must pass before Task 4.
 
 ### Task 4: Tolerate empty strings in members (fix 4)
 
