@@ -5,6 +5,7 @@
 
 ### Features
 
+- Verify acceptance criteria for first-day fixes
 - Clean up service messages after group creation
 - Verify chat existence before replaying group_create
 - Tolerate blank user references in group create and bulk add

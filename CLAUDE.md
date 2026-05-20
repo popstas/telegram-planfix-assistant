@@ -53,6 +53,8 @@ Operation states are `pending | completed | failed | needs_review`. `needs_revie
 
 `data/config.yml` is loaded by `config.loader.load_config()`. Schema (Pydantic) is in `config/models.py`. Notable: `telegram.default_chat_folder.folder_name` is the default for CLI `--folder-name` and for placing newly created groups; chat folders are never auto-created — if the configured folder is missing, the service returns an error.
 
+`telegram.defaults` knobs applied to new groups: `topics_layout` (overridable per call via `groups create --topics-layout` / the `topics_layout` HTTP field); `group_title_postfix`, appended to the Telegram title but deliberately kept out of the idempotency key so Planfix replays still match on the raw title; `default_member_permissions.{create_topics,pin_messages}`, set as the group's default member rights; and `cleanup_service_messages` / `task_reply_wait_seconds`, which control deleting @planfix_bot's welcome, the `/task <id>` command, and the bot's reply after creation (best-effort — failures land in `skipped`).
+
 ## Updating CLI/HTTP
 
 When you add or change a CLI command or HTTP endpoint, update `skills/telegram-planfix-assistant/SKILL.md` and re-sync it to `~/.claude/skills/telegram-planfix-assistant/SKILL.md` in the same change. Update the Commands section in `README.md` too. The `tests/test_skill_inventory.py` guard will fail otherwise.
