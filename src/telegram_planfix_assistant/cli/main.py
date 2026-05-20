@@ -255,6 +255,12 @@ def groups_create(
         "--no-topics",
         help="Do not enable topics even if defaults allow it.",
     ),
+    topics_layout: str | None = typer.Option(
+        None,
+        "--topics-layout",
+        help="Topics layout for the new group: 'list' or 'tabs' "
+        "(defaults to telegram.defaults.topics_layout).",
+    ),
     folder_name: str | None = typer.Option(
         None,
         "--folder-name",
@@ -303,6 +309,13 @@ def groups_create(
 
     config, manager, store, open_backends = _build_group_backends(config_path)
 
+    if topics_layout is not None and topics_layout not in ("list", "tabs"):
+        typer.echo(
+            f"invalid --topics-layout {topics_layout!r}: expected 'list' or 'tabs'",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
     # Merge configured reserves with extra ones from CLI: extras add on top.
     extra_admins = list(reserve_admin or [])
     extra_members = list(reserve_member or [])
@@ -326,6 +339,7 @@ def groups_create(
         reserve_members=reserve_members_arg,
         skip_reserve=no_reserve and not (extra_admins or extra_members),
         enable_topics=False if no_topics else None,
+        topics_layout=topics_layout,
         create_invite_link=False if no_invite_link else None,
         folder_name=folder_name,
         folder_id=folder_id,
@@ -347,6 +361,9 @@ def groups_create(
             request.enable_topics
             if request.enable_topics is not None
             else config.telegram.defaults.enable_topics
+        )
+        topics_layout_eff = (
+            request.topics_layout or config.telegram.defaults.topics_layout
         )
         create_link_eff = (
             request.create_invite_link
@@ -422,6 +439,10 @@ def groups_create(
         planned_actions: list[str] = [
             f"create supergroup title={effective_title!r} enable_topics={enable_topics_eff}",
         ]
+        if enable_topics_eff:
+            planned_actions.append(
+                f"set topics layout to {topics_layout_eff!r}"
+            )
         for u in planned_members:
             planned_actions.append(f"add member {u}")
         for u in planned_admins:
@@ -447,6 +468,7 @@ def groups_create(
             "effective_title": effective_title,
             "planfix_task_id": request.planfix_task_id,
             "enable_topics": enable_topics_eff,
+            "topics_layout": topics_layout_eff if enable_topics_eff else None,
             "create_invite_link": create_link_eff,
             "admins": list(request.admins),
             "members": list(request.members),

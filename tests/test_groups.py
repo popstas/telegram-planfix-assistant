@@ -557,6 +557,85 @@ async def test_create_group_skips_layout_when_topics_disabled(
     assert backend.layout_calls == []
 
 
+async def test_create_group_per_request_layout_overrides_config(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    # Config default is "list"; the per-request override asks for "tabs".
+    config = _config_with_layout(minimal_config_yaml, "list")
+    backend = FakeGroupBackend()
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(
+        title="Acme",
+        planfix_task_id=10,
+        skip_reserve=True,
+        topics_layout="tabs",
+    )
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert backend.layout_calls == [(-100123, True)]
+
+
+async def test_create_group_layout_falls_back_to_config_default(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    # No per-request layout → use the config default ("tabs" here).
+    config = _config_with_layout(minimal_config_yaml, "tabs")
+    backend = FakeGroupBackend()
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(
+        title="Acme",
+        planfix_task_id=11,
+        skip_reserve=True,
+        topics_layout=None,
+    )
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert backend.layout_calls == [(-100123, True)]
+
+
+async def test_create_group_per_request_layout_skipped_when_topics_disabled(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config_with_layout(minimal_config_yaml, "list")
+    backend = FakeGroupBackend()
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(
+        title="Acme",
+        planfix_task_id=12,
+        skip_reserve=True,
+        enable_topics=False,
+        topics_layout="tabs",
+    )
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.topics_enabled is False
+    assert backend.layout_calls == []
+
+
 async def test_create_group_layout_failure_does_not_fail_create(
     minimal_config_yaml: str,
     store: OperationStore,
