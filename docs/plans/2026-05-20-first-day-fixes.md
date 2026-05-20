@@ -62,12 +62,12 @@ The seven fixes:
 - Modify: `src/telegram_planfix_assistant/http_api/groups.py` (`GroupCreateBody`)
 - Modify: `src/telegram_planfix_assistant/cli/main.py` (`--topics-layout` option)
 
-- [ ] Add `topics_layout: TopicsLayout | None = None` to `GroupCreateRequest` (+ `to_payload`).
-- [ ] In `_execute_create`, resolve layout as `request.topics_layout or config.defaults.topics_layout` and pass it to the existing post-create `set_topics_layout` call (group is created first, layout applied after — already the order).
-- [ ] Add `topics_layout` to `GroupCreateBody` and thread it into `GroupCreateRequest`.
-- [ ] Add `--topics-layout [list|tabs]` to `groups create` and into the request; show it in dry-run output.
-- [ ] Write tests: per-request layout overrides config default; absent value falls back to config; layout still skipped when `enable_topics` is false.
-- [ ] Run `pytest` — must pass before Task 3.
+- [x] Add `topics_layout: TopicsLayout | None = None` to `GroupCreateRequest` (+ `to_payload`).
+- [x] In `_execute_create`, resolve layout as `request.topics_layout or config.defaults.topics_layout` and pass it to the existing post-create `set_topics_layout` call (group is created first, layout applied after — already the order).
+- [x] Add `topics_layout` to `GroupCreateBody` and thread it into `GroupCreateRequest`.
+- [x] Add `--topics-layout [list|tabs]` to `groups create` and into the request; show it in dry-run output.
+- [x] Write tests: per-request layout overrides config default; absent value falls back to config; layout still skipped when `enable_topics` is false.
+- [x] Run `pytest` — must pass before Task 3.
 
 ### Task 3: Default group permissions — create_topics, pin_messages (fix 7)
 

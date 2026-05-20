@@ -42,6 +42,7 @@ class GroupCreateBody(BaseModel):
     reserve_members: list[str] | None = None
     skip_reserve: bool = False
     enable_topics: bool | None = None
+    topics_layout: Literal["list", "tabs"] | None = None
     create_invite_link: bool | None = None
     folder_name: str | None = None
     folder_id: int | None = None
@@ -112,6 +113,7 @@ def build_router() -> APIRouter:
             reserve_members=body.reserve_members,
             skip_reserve=body.skip_reserve,
             enable_topics=body.enable_topics,
+            topics_layout=body.topics_layout,
             create_invite_link=body.create_invite_link,
             folder_name=body.folder_name,
             folder_id=body.folder_id,

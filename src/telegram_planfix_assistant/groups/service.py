@@ -92,6 +92,7 @@ class GroupCreateRequest:
     reserve_members: Sequence[str] | None = None
     skip_reserve: bool = False
     enable_topics: bool | None = None
+    topics_layout: TopicsLayout | None = None
     create_invite_link: bool | None = None
     folder_name: str | None = None
     folder_id: int | None = None
@@ -112,6 +113,7 @@ class GroupCreateRequest:
             ),
             "skip_reserve": self.skip_reserve,
             "enable_topics": self.enable_topics,
+            "topics_layout": self.topics_layout,
             "create_invite_link": self.create_invite_link,
             "folder_name": self.folder_name,
             "folder_id": self.folder_id,
@@ -268,7 +270,7 @@ async def _execute_create(
     )
 
     if enable_topics:
-        layout = config.defaults.topics_layout
+        layout = request.topics_layout or config.defaults.topics_layout
         try:
             await backend.set_topics_layout(
                 chat_id=chat_id, tabs=_layout_to_tabs(layout)
