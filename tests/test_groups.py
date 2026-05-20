@@ -296,6 +296,80 @@ async def test_create_group_idempotent_by_title_when_no_task_id(
     assert second.replayed is True
 
 
+async def test_create_group_applies_title_postfix(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    config.telegram.defaults.group_title_postfix = " [client]"
+    backend = FakeGroupBackend()
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", skip_reserve=True)
+
+    result, _ = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    # The postfix lands on the Telegram title and on the returned result.
+    assert backend.created[0]["title"] == "Acme [client]"
+    assert result.title == "Acme [client]"
+
+
+async def test_title_postfix_does_not_change_idempotency_key(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    config.telegram.defaults.group_title_postfix = " [client]"
+    backend1 = FakeGroupBackend(chat_id=-7)
+    request = GroupCreateRequest(title="Beta", skip_reserve=True)
+
+    first, _ = await create_group(
+        backend=backend1,
+        folder_backend=FakeFolderBackend(),
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+    assert first.replayed is False
+
+    # A second call with the same raw title replays — the key is on the raw
+    # title, never the postfixed one.
+    backend2 = FakeGroupBackend(chat_id=-99)
+    second, _ = await create_group(
+        backend=backend2,
+        folder_backend=FakeFolderBackend(),
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+    assert second.replayed is True
+    assert second.telegram_chat_id == -7
+    assert backend2.created == []
+
+
+async def test_empty_title_postfix_is_noop(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    assert config.telegram.defaults.group_title_postfix == ""
+    backend = FakeGroupBackend()
+    request = GroupCreateRequest(title="Acme", skip_reserve=True)
+
+    result, _ = await create_group(
+        backend=backend,
+        folder_backend=FakeFolderBackend(),
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert backend.created[0]["title"] == "Acme"
+    assert result.title == "Acme"
+
+
 async def test_create_group_missing_folder_marks_needs_review(
     minimal_config_yaml: str, store: OperationStore
 ) -> None:

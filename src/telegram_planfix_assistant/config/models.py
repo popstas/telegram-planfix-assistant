@@ -22,6 +22,9 @@ class TelegramDefaults(BaseModel):
     enable_topics: bool = True
     create_invite_link: bool = True
     topics_layout: TopicsLayout = "list"
+    # Appended to the Telegram chat title at creation time. Kept out of the
+    # idempotency key so Planfix replays still match on the raw title.
+    group_title_postfix: str = ""
 
 
 class TelegramConfig(BaseModel):

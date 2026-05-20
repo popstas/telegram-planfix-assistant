@@ -256,8 +256,13 @@ async def _execute_create(
         else config.defaults.create_invite_link
     )
 
+    # The postfix is a presentation concern only: it lands on the Telegram
+    # title but never enters the idempotency key (keyed on raw request.title),
+    # so Planfix replays of the same task still match.
+    effective_title = f"{request.title}{config.defaults.group_title_postfix}"
+
     chat_id = await backend.create_supergroup(
-        title=request.title,
+        title=effective_title,
         about=request.about,
         enable_topics=enable_topics,
     )
@@ -409,7 +414,7 @@ async def _execute_create(
 
     return GroupCreateResult(
         telegram_chat_id=chat_id,
-        title=request.title,
+        title=effective_title,
         planfix_task_id=request.planfix_task_id,
         invite_link=invite_link,
         folder_id=folder_id,

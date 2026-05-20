@@ -48,12 +48,12 @@ The seven fixes:
 - Modify: `src/telegram_planfix_assistant/groups/service.py`
 - Modify: `src/telegram_planfix_assistant/cli/main.py` (dry-run effective title)
 
-- [ ] Add `group_title_postfix: str = ""` to `TelegramDefaults`.
-- [ ] In `_execute_create`, compute the effective Telegram title as `request.title + config.defaults.group_title_postfix` and pass it to `create_supergroup`; keep the idempotency key on the raw `request.title` (unchanged).
-- [ ] Set `GroupCreateResult.title` to the effective title actually used on Telegram.
-- [ ] Reflect the effective title in the CLI dry-run `planned_actions`/`resolved` output.
-- [ ] Write tests: postfix applied to created title; idempotency key/replay still keyed on raw title; empty postfix is a no-op.
-- [ ] Run `pytest` — must pass before Task 2.
+- [x] Add `group_title_postfix: str = ""` to `TelegramDefaults`.
+- [x] In `_execute_create`, compute the effective Telegram title as `request.title + config.defaults.group_title_postfix` and pass it to `create_supergroup`; keep the idempotency key on the raw `request.title` (unchanged).
+- [x] Set `GroupCreateResult.title` to the effective title actually used on Telegram.
+- [x] Reflect the effective title in the CLI dry-run `planned_actions`/`resolved` output.
+- [x] Write tests: postfix applied to created title; idempotency key/replay still keyed on raw title; empty postfix is a no-op.
+- [x] Run `pytest` — must pass before Task 2.
 
 ### Task 2: Per-request topics_layout on group creation (fix 2)
 
