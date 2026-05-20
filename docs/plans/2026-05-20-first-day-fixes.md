@@ -113,12 +113,12 @@ The seven fixes:
 - Modify: `src/telegram_planfix_assistant/groups/telethon_backend.py` (+ protocol in `service.py`)
 - Modify: `src/telegram_planfix_assistant/groups/service.py` (`_execute_create`)
 
-- [ ] Add config knobs under `TelegramDefaults`: `cleanup_service_messages: bool = True` and `task_reply_wait_seconds: int = <small default>`.
-- [ ] Add backend verbs `get_recent_messages(*, chat_id, limit)` (returns id + sender/bot + reply-to/text summary) and `delete_messages(*, chat_id, message_ids)` to the protocol and `TelethonGroupBackend`.
-- [ ] In `_execute_create`, after population and the `/task` send: poll `get_recent_messages` up to `task_reply_wait_seconds` for @planfix_bot's reply, then delete the @planfix_bot welcome message, our `/task` message (id already returned by `send_message`), and the bot reply.
-- [ ] Make cleanup best-effort: failures append to `skipped[]`, never fail the create; gated by `cleanup_service_messages` and only when the `/task` message was sent / bot is in the group.
-- [ ] Write tests with a fake backend: welcome + command + reply ids deleted when the reply arrives within the wait; reply that never arrives still deletes welcome + command and records the missing reply in `skipped`; cleanup disabled by config is a no-op.
-- [ ] Run `pytest` — must pass before Task 7.
+- [x] Add config knobs under `TelegramDefaults`: `cleanup_service_messages: bool = True` and `task_reply_wait_seconds: int = <small default>`.
+- [x] Add backend verbs `get_recent_messages(*, chat_id, limit)` (returns id + sender/bot + reply-to/text summary) and `delete_messages(*, chat_id, message_ids)` to the protocol and `TelethonGroupBackend`.
+- [x] In `_execute_create`, after population and the `/task` send: poll `get_recent_messages` up to `task_reply_wait_seconds` for @planfix_bot's reply, then delete the @planfix_bot welcome message, our `/task` message (id already returned by `send_message`), and the bot reply.
+- [x] Make cleanup best-effort: failures append to `skipped[]`, never fail the create; gated by `cleanup_service_messages` and only when the `/task` message was sent / bot is in the group.
+- [x] Write tests with a fake backend: welcome + command + reply ids deleted when the reply arrives within the wait; reply that never arrives still deletes welcome + command and records the missing reply in `skipped`; cleanup disabled by config is a no-op.
+- [x] Run `pytest` — must pass before Task 7.
 
 ### Task 7: Verify acceptance criteria
 

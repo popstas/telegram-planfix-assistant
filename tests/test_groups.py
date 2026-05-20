@@ -52,6 +52,10 @@ class FakeGroupBackend:
         set_permissions_error: Exception | None = None,
         chat_exists_result: bool = True,
         chat_exists_error: Exception | None = None,
+        recent_messages: list[dict[str, Any]] | None = None,
+        get_messages_error: Exception | None = None,
+        delete_messages_error: Exception | None = None,
+        sent_message_id: int = 42,
     ) -> None:
         self._chat_id = chat_id
         self._fail_on_add = fail_on_add or set()
@@ -61,6 +65,10 @@ class FakeGroupBackend:
         self._set_permissions_error = set_permissions_error
         self._chat_exists_result = chat_exists_result
         self._chat_exists_error = chat_exists_error
+        self._recent_messages = recent_messages or []
+        self._get_messages_error = get_messages_error
+        self._delete_messages_error = delete_messages_error
+        self._sent_message_id = sent_message_id
         self.chat_exists_calls: list[int] = []
         self.created: list[dict[str, Any]] = []
         self.added: list[str] = []
@@ -69,6 +77,8 @@ class FakeGroupBackend:
         self.invite_calls = 0
         self.layout_calls: list[tuple[int, bool]] = []
         self.permission_calls: list[tuple[int, bool, bool]] = []
+        self.get_messages_calls: list[tuple[int, int]] = []
+        self.deleted_messages: list[int] = []
         self.current_tabs: bool = False
 
     async def create_supergroup(
@@ -101,7 +111,22 @@ class FakeGroupBackend:
 
     async def send_message(self, *, chat_id: int, text: str) -> int:
         self.messages.append((chat_id, text))
-        return 42
+        return self._sent_message_id
+
+    async def get_recent_messages(
+        self, *, chat_id: int, limit: int
+    ) -> list[dict[str, Any]]:
+        self.get_messages_calls.append((chat_id, limit))
+        if self._get_messages_error is not None:
+            raise self._get_messages_error
+        return list(self._recent_messages)
+
+    async def delete_messages(
+        self, *, chat_id: int, message_ids: Any
+    ) -> None:
+        if self._delete_messages_error is not None:
+            raise self._delete_messages_error
+        self.deleted_messages.extend(int(m) for m in message_ids)
 
     async def set_topics_layout(self, *, chat_id: int, tabs: bool) -> None:
         if self._set_layout_error is not None:
@@ -843,6 +868,142 @@ async def test_create_group_permissions_flood_wait_promotes_to_needs_review(
             config=config.telegram,
             request=request,
         )
+
+
+async def test_cleanup_deletes_welcome_command_and_reply(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    # send_message returns id 42; the bot welcome is 40 and its reply is 43.
+    recent = [
+        {"id": 43, "sender_username": "planfix_bot", "reply_to_msg_id": 42, "text": "ok"},
+        {"id": 42, "sender_username": None, "reply_to_msg_id": None, "text": "/task 1"},
+        {"id": 40, "sender_username": "planfix_bot", "reply_to_msg_id": None, "text": "hi"},
+    ]
+    backend = FakeGroupBackend(recent_messages=recent, sent_message_id=42)
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=1, skip_reserve=False)
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.task_message_sent is True
+    # Welcome (40), command (42), and reply (43) are all deleted.
+    assert sorted(backend.deleted_messages) == [40, 42, 43]
+    assert not any(s["step"] == "cleanup_bot_reply" for s in result.skipped)
+
+
+async def test_cleanup_without_reply_still_deletes_welcome_and_command(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    # No bot reply present — only the welcome (40) and our command (42).
+    recent = [
+        {"id": 42, "sender_username": None, "reply_to_msg_id": None, "text": "/task 2"},
+        {"id": 40, "sender_username": "planfix_bot", "reply_to_msg_id": None, "text": "hi"},
+    ]
+    backend = FakeGroupBackend(recent_messages=recent, sent_message_id=42)
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=2, skip_reserve=False)
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert sorted(backend.deleted_messages) == [40, 42]
+    missing = [s for s in result.skipped if s["step"] == "cleanup_bot_reply"]
+    assert missing, "expected the missing bot reply to be recorded in skipped"
+
+
+async def test_cleanup_disabled_is_noop(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    config.telegram.defaults.cleanup_service_messages = False
+    recent = [
+        {"id": 40, "sender_username": "planfix_bot", "reply_to_msg_id": None, "text": "hi"},
+    ]
+    backend = FakeGroupBackend(recent_messages=recent, sent_message_id=42)
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=3, skip_reserve=False)
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    # Cleanup never ran: no message reads and no deletions.
+    assert backend.get_messages_calls == []
+    assert backend.deleted_messages == []
+
+
+async def test_cleanup_skipped_when_no_task_message(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    backend = FakeGroupBackend(sent_message_id=42)
+    folder_backend = FakeFolderBackend()
+    # No planfix_task_id → no /task message → nothing to clean up.
+    request = GroupCreateRequest(title="Acme", skip_reserve=False)
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.task_message_sent is False
+    assert backend.get_messages_calls == []
+    assert backend.deleted_messages == []
+
+
+async def test_cleanup_delete_failure_recorded_in_skipped(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    recent = [
+        {"id": 42, "sender_username": None, "reply_to_msg_id": None, "text": "/task 4"},
+        {"id": 40, "sender_username": "planfix_bot", "reply_to_msg_id": None, "text": "hi"},
+    ]
+    backend = FakeGroupBackend(
+        recent_messages=recent,
+        sent_message_id=42,
+        delete_messages_error=RuntimeError("cannot delete"),
+    )
+    folder_backend = FakeFolderBackend()
+    request = GroupCreateRequest(title="Acme", planfix_task_id=4, skip_reserve=False)
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    # A delete failure must not fail the create — it lands in skipped.
+    assert op.status is OperationStatus.COMPLETED
+    delete_skips = [s for s in result.skipped if s["step"] == "cleanup_delete"]
+    assert delete_skips
+    assert "cannot delete" in delete_skips[0]["reason"]
 
 
 async def test_create_group_skip_folder_bypasses_folder_resolution(
