@@ -137,3 +137,53 @@ class TelethonGroupBackend:
             raise translate_flood_wait(exc) from exc
         message_id = getattr(sent, "id", 0)
         return int(message_id)
+
+    async def set_topics_layout(self, *, chat_id: int, tabs: bool) -> None:
+        from telethon.tl.functions.channels import ToggleForumRequest
+
+        try:
+            channel = await self._client.get_input_entity(chat_id)
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
+        try:
+            await self._client(
+                ToggleForumRequest(channel=channel, enabled=True, tabs=tabs)
+            )
+        except TypeError:
+            if tabs:
+                try:
+                    await self._client(
+                        ToggleForumRequest(channel=channel, enabled=True)
+                    )
+                except Exception as exc:
+                    raise translate_flood_wait(exc) from exc
+                return
+            raise RuntimeError(
+                "Telethon build does not support the `tabs` argument to "
+                "ToggleForumRequest; cannot switch a forum to list layout"
+            ) from None
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
+
+    async def get_topics_layout(self, *, chat_id: int) -> bool:
+        from telethon.tl.functions.channels import GetFullChannelRequest
+
+        try:
+            channel = await self._client.get_input_entity(chat_id)
+            full = await self._client(GetFullChannelRequest(channel=channel))
+        except Exception as exc:
+            raise translate_flood_wait(exc) from exc
+        # `forum_tabs` is a flag on the Channel constructor (flags2.19), not
+        # on ChannelFull. Telegram returns the matching Channel in
+        # `messages.ChatFull.chats`; resolve it by id from `full_chat.id` and
+        # fall back to the first chat if Telegram only returned one.
+        chats = list(getattr(full, "chats", None) or [])
+        full_chat = getattr(full, "full_chat", None)
+        target_id = int(getattr(full_chat, "id", 0)) if full_chat is not None else 0
+        target = next(
+            (c for c in chats if int(getattr(c, "id", 0)) == target_id),
+            None,
+        )
+        if target is None and chats:
+            target = chats[0]
+        return bool(getattr(target, "forum_tabs", False))

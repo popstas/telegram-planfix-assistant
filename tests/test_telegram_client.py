@@ -10,6 +10,8 @@ from typer.testing import CliRunner
 
 from telegram_planfix_assistant.cli.main import app as cli_app
 from telegram_planfix_assistant.config import load_config_from_text
+from telegram_planfix_assistant.config.loader import ConfigError
+from telegram_planfix_assistant.telegram_client.proxy import HTTP, SOCKS5
 from telegram_planfix_assistant.telegram_client.session import (
     TelethonSessionManager,
     _reset_shared_for_tests,
@@ -235,6 +237,86 @@ def test_get_shared_manager_without_configure_raises() -> None:
     _reset_shared_for_tests()
     with pytest.raises(RuntimeError, match="not been configured"):
         get_shared_manager()
+
+
+async def test_no_proxy_means_no_proxy_kwarg(minimal_config_yaml: str) -> None:
+    """When proxy_url is unset, factory must be called without a proxy kwarg."""
+    config = load_config_from_text(minimal_config_yaml)
+    recorded: list[dict[str, Any]] = []
+
+    def factory(session_path: str, api_id: int, api_hash: str, **kwargs: Any) -> FakeTelethonClient:
+        recorded.append(kwargs)
+        return FakeTelethonClient(session_path, api_id, api_hash)
+
+    manager = TelethonSessionManager(config.telegram, client_factory=factory)
+    await manager.get_client()
+
+    assert recorded == [{}]
+
+
+async def test_proxy_url_passed_through_to_factory(minimal_config_yaml: str) -> None:
+    yaml_with_proxy = minimal_config_yaml.replace(
+        'api_hash: "telegram_api_hash"',
+        'api_hash: "telegram_api_hash"\n  proxy_url: "socks5://user:pw@h:1080"',
+    )
+    config = load_config_from_text(yaml_with_proxy)
+    recorded: list[dict[str, Any]] = []
+
+    def factory(session_path: str, api_id: int, api_hash: str, **kwargs: Any) -> FakeTelethonClient:
+        recorded.append(kwargs)
+        return FakeTelethonClient(session_path, api_id, api_hash)
+
+    manager = TelethonSessionManager(config.telegram, client_factory=factory)
+    await manager.get_client()
+
+    assert recorded == [
+        {
+            "proxy": {
+                "proxy_type": SOCKS5,
+                "addr": "h",
+                "port": 1080,
+                "username": "user",
+                "password": "pw",
+            }
+        }
+    ]
+
+
+async def test_http_proxy_url_passed_through_to_factory(minimal_config_yaml: str) -> None:
+    yaml_with_proxy = minimal_config_yaml.replace(
+        'api_hash: "telegram_api_hash"',
+        'api_hash: "telegram_api_hash"\n  proxy_url: "http://u:p@host:3128"',
+    )
+    config = load_config_from_text(yaml_with_proxy)
+    recorded: list[dict[str, Any]] = []
+
+    def factory(session_path: str, api_id: int, api_hash: str, **kwargs: Any) -> FakeTelethonClient:
+        recorded.append(kwargs)
+        return FakeTelethonClient(session_path, api_id, api_hash)
+
+    manager = TelethonSessionManager(config.telegram, client_factory=factory)
+    await manager.get_client()
+
+    assert recorded == [
+        {
+            "proxy": {
+                "proxy_type": HTTP,
+                "addr": "host",
+                "port": 3128,
+                "username": "u",
+                "password": "p",
+            }
+        }
+    ]
+
+
+def test_invalid_proxy_url_fails_at_config_load(minimal_config_yaml: str) -> None:
+    yaml_bad = minimal_config_yaml.replace(
+        'api_hash: "telegram_api_hash"',
+        'api_hash: "telegram_api_hash"\n  proxy_url: "ftp://host"',
+    )
+    with pytest.raises(ConfigError, match="Unsupported proxy scheme"):
+        load_config_from_text(yaml_bad)
 
 
 def test_auth_cli_reports_already_authorized(

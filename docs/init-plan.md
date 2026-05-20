@@ -79,6 +79,7 @@ Planfix будет вызывать сервис из сценариев или 
 telegram:
   api_id: 123456
   api_hash: "telegram_api_hash"
+  # proxy_url: "socks5://user:pass@host:1080"  # опционально; socks5/socks4/http/https
   session_path: /data/telegram-planfix-assistant.session
   main_account_label: planfix-assistant-main
   reserve_admins:
@@ -91,6 +92,7 @@ telegram:
   defaults:
     enable_topics: true
     create_invite_link: true
+    topics_layout: "list"   # "list" | "tabs" — применяется после groups create
 
 http:
   host: "0.0.0.0"
