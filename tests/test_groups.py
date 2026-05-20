@@ -50,6 +50,8 @@ class FakeGroupBackend:
         invite_link: str | None = "https://t.me/+invitehash",
         set_layout_error: Exception | None = None,
         set_permissions_error: Exception | None = None,
+        chat_exists_result: bool = True,
+        chat_exists_error: Exception | None = None,
     ) -> None:
         self._chat_id = chat_id
         self._fail_on_add = fail_on_add or set()
@@ -57,6 +59,9 @@ class FakeGroupBackend:
         self._invite_link = invite_link
         self._set_layout_error = set_layout_error
         self._set_permissions_error = set_permissions_error
+        self._chat_exists_result = chat_exists_result
+        self._chat_exists_error = chat_exists_error
+        self.chat_exists_calls: list[int] = []
         self.created: list[dict[str, Any]] = []
         self.added: list[str] = []
         self.promoted: list[str] = []
@@ -106,6 +111,12 @@ class FakeGroupBackend:
 
     async def get_topics_layout(self, *, chat_id: int) -> bool:
         return self.current_tabs
+
+    async def chat_exists(self, *, chat_id: int) -> bool:
+        self.chat_exists_calls.append(chat_id)
+        if self._chat_exists_error is not None:
+            raise self._chat_exists_error
+        return self._chat_exists_result
 
     async def set_default_permissions(
         self,
@@ -856,6 +867,137 @@ async def test_create_group_skip_folder_bypasses_folder_resolution(
     assert op.status is OperationStatus.COMPLETED
     assert result.folder_id is None
     assert folder_backend.added == []
+
+
+async def test_replay_returns_saved_result_when_chat_exists(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    backend1 = FakeGroupBackend(chat_id=-555)
+    request = GroupCreateRequest(title="Acme", planfix_task_id=70, skip_reserve=True)
+
+    first, _ = await create_group(
+        backend=backend1,
+        folder_backend=FakeFolderBackend(),
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+    assert first.replayed is False
+
+    # The chat still exists, so the replay returns the saved chat id and never
+    # touches the backend's create path.
+    backend2 = FakeGroupBackend(chat_id=-999, chat_exists_result=True)
+    second, _ = await create_group(
+        backend=backend2,
+        folder_backend=FakeFolderBackend(),
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+    assert second.replayed is True
+    assert second.telegram_chat_id == -555
+    assert backend2.chat_exists_calls == [-555]
+    assert backend2.created == []
+
+
+async def test_stale_completed_op_dropped_and_recreated_when_chat_gone(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    backend1 = FakeGroupBackend(chat_id=-555)
+    request = GroupCreateRequest(title="Acme", planfix_task_id=71, skip_reserve=True)
+
+    first, op1 = await create_group(
+        backend=backend1,
+        folder_backend=FakeFolderBackend(),
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+    assert first.telegram_chat_id == -555
+
+    # The saved chat was deleted out-of-band; the next call must drop the stale
+    # operation and create a brand-new group with a fresh chat id.
+    backend2 = FakeGroupBackend(chat_id=-777, chat_exists_result=False)
+    second, op2 = await create_group(
+        backend=backend2,
+        folder_backend=FakeFolderBackend(),
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+    assert second.replayed is False
+    assert second.telegram_chat_id == -777
+    assert backend2.chat_exists_calls == [-555]
+    assert backend2.created, "expected a fresh create when the chat was gone"
+    assert op2.status is OperationStatus.COMPLETED
+    # A new operation row replaced the stale one.
+    assert op2.id != op1.id
+
+
+async def test_flood_wait_during_existence_check_needs_review(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    from telegram_planfix_assistant.worker.queue import FloodWaitError
+
+    config = _config(minimal_config_yaml)
+    backend1 = FakeGroupBackend(chat_id=-555)
+    request = GroupCreateRequest(title="Acme", planfix_task_id=72, skip_reserve=True)
+
+    await create_group(
+        backend=backend1,
+        folder_backend=FakeFolderBackend(),
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    # A throttle during the existence check is ambiguous — surface needs_review
+    # rather than silently re-creating a possibly-live chat.
+    backend2 = FakeGroupBackend(
+        chat_id=-777, chat_exists_error=FloodWaitError(seconds=30)
+    )
+    with pytest.raises(GroupCreateNeedsReview):
+        await create_group(
+            backend=backend2,
+            folder_backend=FakeFolderBackend(),
+            store=store,
+            config=config.telegram,
+            request=request,
+        )
+    assert backend2.created == []
+    # The original completed operation is still intact (not deleted).
+    op = store.find_by_idempotency_key("group_create:planfix_task_id=72")
+    assert op is not None
+    assert op.status is OperationStatus.COMPLETED
+
+
+def test_delete_operation_removes_row_and_index(
+    minimal_config_yaml: str, tmp_path: Path
+) -> None:
+    from telegram_planfix_assistant.persistence import idempotency
+
+    store = OperationStore(tmp_path / "del.db")
+    begin = store.begin_operation(
+        operation_type=idempotency.GROUP_CREATE,
+        idempotency_key="group_create:title:Acme",
+        request_payload={"title": "Acme"},
+    )
+    op_id = begin.operation.id
+    store.complete_operation(op_id, {"telegram_chat_id": -1})
+
+    store.delete_operation(op_id)
+
+    assert store.find_by_idempotency_key("group_create:title:Acme") is None
+    # The idempotency key is free again — a fresh begin creates a new row.
+    again = store.begin_operation(
+        operation_type=idempotency.GROUP_CREATE,
+        idempotency_key="group_create:title:Acme",
+        request_payload={"title": "Acme"},
+    )
+    assert again.created is True
+    assert again.operation.id != op_id
 
 
 # ---------------------------------------------------------------------------
