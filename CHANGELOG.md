@@ -5,6 +5,7 @@
 
 ### Features
 
+- Tolerate blank user references in group create and bulk add
 - Default group permissions for create_topics and pin_messages
 - Per-request topics_layout on group creation
 - Configurable chat-title postfix on group creation

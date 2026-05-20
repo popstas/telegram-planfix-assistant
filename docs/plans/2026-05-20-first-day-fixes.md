@@ -100,11 +100,11 @@ The seven fixes:
 - Modify: `src/telegram_planfix_assistant/persistence/store.py`
 - Modify: `src/telegram_planfix_assistant/groups/service.py` (replay path in `create_group`)
 
-- [ ] Add `chat_exists(*, chat_id) -> bool` to the `GroupBackend` protocol and implement in `TelethonGroupBackend` (resolve the entity / `GetFullChannelRequest`; return `False` on the "channel/chat not found" error, re-raise FLOOD_WAIT).
-- [ ] Add `delete_operation(operation_id)` to `OperationStore` that removes the operation row, its `idempotency_index` entry, and any `operation_items` in one transaction.
-- [ ] In `create_group`, when the existing op is `COMPLETED`, verify the saved `telegram_chat_id` still exists; if it does not, delete the stale operation and fall through to a fresh `begin_operation` + live create instead of replaying.
-- [ ] Write tests: replay returns saved result when chat exists; when `chat_exists` is False the stale op is dropped and a new group is created with a new chat id; FLOOD_WAIT during the existence check surfaces as `needs_review` (no silent re-create).
-- [ ] Run `pytest` — must pass before Task 6.
+- [x] Add `chat_exists(*, chat_id) -> bool` to the `GroupBackend` protocol and implement in `TelethonGroupBackend` (resolve the entity / `GetFullChannelRequest`; return `False` on the "channel/chat not found" error, re-raise FLOOD_WAIT).
+- [x] Add `delete_operation(operation_id)` to `OperationStore` that removes the operation row, its `idempotency_index` entry, and any `operation_items` in one transaction.
+- [x] In `create_group`, when the existing op is `COMPLETED`, verify the saved `telegram_chat_id` still exists; if it does not, delete the stale operation and fall through to a fresh `begin_operation` + live create instead of replaying.
+- [x] Write tests: replay returns saved result when chat exists; when `chat_exists` is False the stale op is dropped and a new group is created with a new chat id; FLOOD_WAIT during the existence check surfaces as `needs_review` (no silent re-create).
+- [x] Run `pytest` — must pass before Task 6.
 
 ### Task 6: Clean up service messages — welcome + /task + bot reply (fixes 5 & 6)
 

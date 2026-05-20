@@ -209,6 +209,9 @@ class GroupBackend(Protocol):
     async def get_topics_layout(self, *, chat_id: int) -> bool:
         ...
 
+    async def chat_exists(self, *, chat_id: int) -> bool:
+        ...
+
     async def set_default_permissions(
         self,
         *,
@@ -511,19 +514,50 @@ async def create_group(
         op = begin.operation
         if op.status is OperationStatus.COMPLETED:
             payload = op.result_payload or {}
-            return GroupCreateResult.from_dict(payload), op
-        if op.status is OperationStatus.FAILED:
+            saved_chat_id = payload.get("telegram_chat_id")
+            # Before replaying, confirm the saved chat still exists on Telegram.
+            # If it was manually deleted out-of-band, the saved result points at
+            # a dead chat — drop the stale operation and fall through to a fresh
+            # create instead of handing back a chat id that no longer resolves.
+            try:
+                still_exists = (
+                    saved_chat_id is not None
+                    and await backend.chat_exists(chat_id=int(saved_chat_id))
+                )
+            except FloodWaitError as exc:
+                # A throttle during the existence check is ambiguous — we don't
+                # know whether the chat is gone. Surface needs_review rather than
+                # silently re-creating a chat that may still be alive.
+                raise GroupCreateNeedsReview(
+                    f"FLOOD_WAIT while verifying chat {saved_chat_id} exists: {exc}"
+                ) from exc
+            if still_exists:
+                return GroupCreateResult.from_dict(payload), op
+            logger.warning(
+                "saved chat %s for operation %s no longer exists; dropping the "
+                "stale operation and re-creating the group",
+                saved_chat_id,
+                op.id,
+            )
+            store.delete_operation(op.id)
+            begin = store.begin_operation(
+                operation_type=idempotency.GROUP_CREATE,
+                idempotency_key=key,
+                request_payload=request.to_payload(),
+            )
+        elif op.status is OperationStatus.FAILED:
             raise GroupCreateFailed(op.error or "previous attempt failed")
-        if op.status is OperationStatus.NEEDS_REVIEW:
+        elif op.status is OperationStatus.NEEDS_REVIEW:
             raise GroupCreateNeedsReview(
                 op.error or "previous attempt needs review"
             )
-        # pending: another request is already in flight (or a previous run
-        # crashed before transitioning). We don't auto-retry from this surface;
-        # callers can `operations retry`.
-        raise GroupCreatePending(
-            f"operation {op.id} is still pending; retry via 'operations retry'"
-        )
+        else:
+            # pending: another request is already in flight (or a previous run
+            # crashed before transitioning). We don't auto-retry from this
+            # surface; callers can `operations retry`.
+            raise GroupCreatePending(
+                f"operation {op.id} is still pending; retry via 'operations retry'"
+            )
 
     operation_id = begin.operation.id
     try:

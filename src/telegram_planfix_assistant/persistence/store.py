@@ -285,6 +285,30 @@ class OperationStore:
             operation_id, OperationStatus.NEEDS_REVIEW, error=error
         )
 
+    def delete_operation(self, operation_id: str) -> None:
+        """Remove an operation row, its idempotency index entry, and items.
+
+        Used to drop a stale ``completed`` group_create whose Telegram chat was
+        deleted out-of-band, so a fresh create can claim the same idempotency
+        key. ``foreign_keys=ON`` requires children (``operation_items``) to go
+        before the parent. A missing row is a no-op.
+        """
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM operation_items WHERE operation_id = ?",
+                (operation_id,),
+            )
+            conn.execute(
+                "DELETE FROM idempotency_index WHERE operation_id = ?",
+                (operation_id,),
+            )
+            conn.execute(
+                "DELETE FROM operations WHERE id = ?",
+                (operation_id,),
+            )
+            conn.execute("COMMIT")
+
     def wait_for_completion(
         self,
         operation_id: str,

@@ -196,6 +196,41 @@ class TelethonGroupBackend:
         except Exception as exc:
             raise translate_flood_wait(exc) from exc
 
+    async def chat_exists(self, *, chat_id: int) -> bool:
+        """Return whether ``chat_id`` still resolves to a live channel.
+
+        Used to guard the group_create replay path: a chat deleted out-of-band
+        must be re-created, not replayed. A FLOOD_WAIT is re-raised (translated)
+        so the caller can promote it to ``needs_review``; a "not found"-style
+        error resolves to ``False``. Any other error propagates unchanged.
+        """
+        from telethon.tl.functions.channels import GetFullChannelRequest
+
+        try:
+            channel = await self._client.get_input_entity(chat_id)
+            await self._client(GetFullChannelRequest(channel=channel))
+        except Exception as exc:
+            translated = translate_flood_wait(exc)
+            if translated is not exc:
+                # A FLOOD_WAIT was translated to our queue signal — re-raise it.
+                raise translated from exc
+            name = type(exc).__name__
+            message = str(exc).lower()
+            # Telethon raises a variety of errors when the entity is gone:
+            # ChannelInvalidError / ChannelPrivateError / PeerIdInvalidError,
+            # or a plain "Cannot find any entity" ValueError from resolution.
+            if (
+                "invalid" in name.lower()
+                or "private" in name.lower()
+                or "cannot find" in message
+                or "could not find" in message
+                or "no user has" in message
+                or "not found" in message
+            ):
+                return False
+            raise translated from exc
+        return True
+
     async def get_topics_layout(self, *, chat_id: int) -> bool:
         from telethon.tl.functions.channels import GetFullChannelRequest
 
