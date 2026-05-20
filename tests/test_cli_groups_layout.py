@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,19 @@ from typer.testing import CliRunner
 
 from telegram_planfix_assistant.cli import main as cli_main
 from telegram_planfix_assistant.persistence import OperationStore
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _normalize_cli_output(text: str) -> str:
+    """Collapse rich panel formatting so substring checks survive line wrapping.
+
+    Typer renders the "Missing option '--chat-id'" error inside a rich panel and
+    may word-wrap the option name across a hyphen, inserting box borders and
+    whitespace mid-token. Strip ANSI codes and everything but alphanumerics so
+    ``--chat-id`` reliably reduces to ``chatid``.
+    """
+    return re.sub(r"[^a-z0-9]", "", _ANSI_RE.sub("", text).lower())
 
 
 def _write_config(tmp_path: Path, body: str) -> Path:
@@ -287,8 +301,8 @@ def test_set_layout_missing_chat_id_errors() -> None:
     runner = CliRunner()
     result = runner.invoke(cli_main.app, ["groups", "set-layout", "--layout", "tabs"])
     assert result.exit_code != 0
-    combined = result.stdout + (result.stderr or "")
-    assert "--chat-id" in combined or "chat_id" in combined.lower()
+    combined = _normalize_cli_output(result.stdout + (result.stderr or ""))
+    assert "chatid" in combined
 
 
 # ---------------------------------------------------------------------------
@@ -356,5 +370,5 @@ def test_get_layout_missing_chat_id_errors() -> None:
     runner = CliRunner()
     result = runner.invoke(cli_main.app, ["groups", "get-layout"])
     assert result.exit_code != 0
-    combined = result.stdout + (result.stderr or "")
-    assert "--chat-id" in combined or "chat_id" in combined.lower()
+    combined = _normalize_cli_output(result.stdout + (result.stderr or ""))
+    assert "chatid" in combined
