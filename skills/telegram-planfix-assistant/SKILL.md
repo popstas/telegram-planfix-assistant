@@ -234,10 +234,10 @@ messages the agent must surface verbatim instead of paraphrasing.
   effective Telegram title also gets `telegram.defaults.group_title_postfix`
   appended (the idempotency key stays on the raw title), members get
   `telegram.defaults.default_member_permissions` (create topics / pin
-  messages), and `telegram.defaults.cleanup_service_messages` removes
-  @planfix_bot's welcome, the `/task` command, and the bot's reply after
-  creation — surface the effective title in the plan so the postfix is
-  visible.
+  messages), and `telegram.defaults.cleanup_planfix_messages` (opt-in,
+  default off) removes @planfix_bot's welcome, the `/task` command, and the
+  bot's reply after creation — surface the effective title in the plan so the
+  postfix is visible.
 - Temp file: no — admins and members go on the command line as repeated
   `--admin @employee_username` / `--member @member_username` flags.
 - Automation: include `--planfix-task-id` when the human gives one; the

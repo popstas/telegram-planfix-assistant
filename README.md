@@ -90,7 +90,7 @@ telegram:
     create_invite_link: true
     topics_layout: "list"        # "list" | "tabs" — applied after groups create
     group_title_postfix: ""      # appended to the Telegram chat title at creation
-    cleanup_service_messages: true   # delete welcome / /task / bot-reply after creation
+    cleanup_planfix_messages: false  # delete welcome / /task / bot-reply after creation (opt-in)
     task_reply_wait_seconds: 5       # how long to poll for @planfix_bot's /task reply
     default_member_permissions:
       create_topics: true        # let ordinary members create forum topics
@@ -103,7 +103,7 @@ telegram:
 
 `default_member_permissions` sets the new group's default banned rights so ordinary members can `create_topics` and `pin_messages`. Other default rights are left untouched.
 
-`cleanup_service_messages` (default `true`) deletes @planfix_bot's welcome message, the `/task <id>` service command, and the bot's reply to it after the group is populated, so the chat starts clean. `task_reply_wait_seconds` is how long the worker polls for the bot's reply before deleting only the welcome + command. All cleanup is best-effort: failures are recorded in the operation's `skipped` list and never fail the create.
+`cleanup_planfix_messages` (default `false`, opt-in) deletes @planfix_bot's welcome message, the `/task <id>` service command, and the bot's reply to it after the group is populated, so the chat starts clean. `task_reply_wait_seconds` is how long the worker polls for the bot's reply before deleting only the welcome + command. All cleanup is best-effort: failures are recorded in the operation's `skipped` list and never fail the create.
 
 See `docs/plans/20260518-telegram-planfix-assistant-mvp.md` for the full configuration schema and feature scope.
 

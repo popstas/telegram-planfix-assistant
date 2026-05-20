@@ -931,7 +931,7 @@ async def test_cleanup_disabled_is_noop(
     minimal_config_yaml: str, store: OperationStore
 ) -> None:
     config = _config(minimal_config_yaml)
-    config.telegram.defaults.cleanup_service_messages = False
+    config.telegram.defaults.cleanup_planfix_messages = False
     recent = [
         {"id": 40, "sender_username": "planfix_bot", "reply_to_msg_id": None, "text": "hi"},
     ]
