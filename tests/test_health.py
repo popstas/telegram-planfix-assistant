@@ -71,6 +71,7 @@ class _FakeManager:
     ) -> None:
         self._authorized = authorized
         self._raise = raise_on_state
+        self.state_calls = 0
         # Default to one folder matching ``minimal_config_yaml`` so the real
         # folder probe succeeds without per-test wiring.
         self._folders = (
@@ -80,6 +81,7 @@ class _FakeManager:
         )
 
     async def state(self) -> Any:
+        self.state_calls += 1
         if self._raise:
             raise RuntimeError("telegram unreachable")
         from telegram_planfix_assistant.telegram_client.session import SessionState
@@ -177,6 +179,24 @@ async def test_collect_health_all_ok(minimal_config_yaml: str, tmp_path: Path) -
         database=DATABASE_OK,
         default_folder=FOLDER_OK,
     )
+
+
+async def test_collect_health_fetches_session_state_once(
+    minimal_config_yaml: str, tmp_path: Path
+) -> None:
+    """The production path must not re-probe the session per sub-check."""
+    config = load_config_from_text(minimal_config_yaml)
+    manager = _FakeManager(authorized=True)
+
+    report = await collect_health(
+        config,
+        session_manager=manager,
+        database_path=tmp_path / "state.db",
+    )
+
+    assert manager.state_calls == 1
+    assert report.telegram_session == SESSION_AUTHORIZED
+    assert report.default_folder == FOLDER_OK
 
 
 async def test_collect_health_unauthorized_session(

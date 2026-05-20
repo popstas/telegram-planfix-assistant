@@ -29,7 +29,11 @@ def _apply_logging_from_config(config_path: Path | None) -> None:
     except Exception:
         return
     try:
-        configure_logging(level=config.logging.level, force=True)
+        configure_logging(
+            level=config.logging.level,
+            telethon_level=config.logging.telethon_level,
+            force=True,
+        )
     except Exception:
         return
 
@@ -60,7 +64,11 @@ def _build_session_manager(config_path: Path | None) -> TelethonSessionManager:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
     try:
-        configure_logging(level=config.logging.level, force=True)
+        configure_logging(
+            level=config.logging.level,
+            telethon_level=config.logging.telethon_level,
+            force=True,
+        )
     except Exception:
         pass
     return TelethonSessionManager(config.telegram)

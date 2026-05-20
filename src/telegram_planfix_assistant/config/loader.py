@@ -45,6 +45,7 @@ queue:
 
 logging:
   level: INFO
+  # telethon_level: WARNING  # uncomment to control Telethon's own log level
 """
 
 

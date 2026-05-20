@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 
 import pytest
 
@@ -64,6 +65,24 @@ def test_log_line_is_json_with_context_fields() -> None:
     assert record["duration_ms"] == 12
     assert "timestamp" in record
     assert "level" in record
+
+
+def test_telethon_logger_capped_at_warning_by_default() -> None:
+    configure_logging(level="DEBUG", stream=io.StringIO(), force=True)
+    assert logging.getLogger("telethon").level == logging.WARNING
+
+
+def test_telethon_logger_honors_more_restrictive_app_level() -> None:
+    configure_logging(level="ERROR", stream=io.StringIO(), force=True)
+    # ERROR is quieter than the WARNING cap, so Telethon follows it.
+    assert logging.getLogger("telethon").level == logging.ERROR
+
+
+def test_telethon_level_override_reenables_debug() -> None:
+    configure_logging(
+        level="INFO", telethon_level="DEBUG", stream=io.StringIO(), force=True
+    )
+    assert logging.getLogger("telethon").level == logging.DEBUG
 
 
 def test_bearer_token_is_redacted() -> None:

@@ -100,17 +100,31 @@ def _redact_processor(
 _CONFIGURED = False
 
 
+# Third-party loggers whose chatter propagates to the root logger. Telethon
+# logs every MTProto packet at DEBUG and "User is already connected!" at INFO,
+# so it floods output whenever the app level is INFO or lower. We cap it
+# independently of the app level (see ``telethon_level`` below).
+_NOISY_LOGGERS: tuple[str, ...] = ("telethon",)
+
+
 def configure_logging(
     level: str = "INFO",
     *,
     stream: Any = None,
     force: bool = False,
+    telethon_level: str | None = None,
 ) -> None:
     """Configure structlog + stdlib logging to emit one JSON object per line.
 
     Safe to call multiple times — only the first call (or one with
     ``force=True``) installs handlers, so importing the module never
     duplicates output.
+
+    ``telethon_level`` controls Telethon's own stdlib logger. When ``None``
+    (the default) Telethon is capped so it is never more verbose than
+    ``WARNING``, regardless of the app ``level`` — this keeps per-health-check
+    Telethon spam out of the logs while the app runs at DEBUG/INFO. Pass an
+    explicit level (e.g. ``"DEBUG"``) to opt back into Telethon's output.
     """
     global _CONFIGURED
     if _CONFIGURED and not force:
@@ -127,6 +141,21 @@ def configure_logging(
         root.removeHandler(existing)
     root.addHandler(handler)
     root.setLevel(level.upper())
+
+    # Cap noisy third-party loggers. Default: never more verbose than WARNING,
+    # but honor a more restrictive app level (e.g. ERROR keeps Telethon at
+    # ERROR). An explicit ``telethon_level`` overrides the cap entirely.
+    if telethon_level is not None:
+        noisy_level: int | str = telethon_level.upper()
+    else:
+        app_numeric = logging.getLevelName(level.upper())
+        noisy_level = (
+            max(app_numeric, logging.WARNING)
+            if isinstance(app_numeric, int)
+            else logging.WARNING
+        )
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(noisy_level)
 
     structlog.configure(
         processors=[

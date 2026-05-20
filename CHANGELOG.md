@@ -5,17 +5,7 @@
 
 ### Features
 
-- Verify topics layout acceptance criteria
-- Add CLAUDE.md rule to update SKILL.md and README on CLI/HTTP changes
-- Add CLI Commands section to README
-- skill: Document groups layout commands and add inventory guard
-- http: Add groups layout get/set endpoints
-- groups: Apply topics_layout default after create
-- cli: Add groups set-layout and get-layout commands
-- groups: Add set/get topics_layout service functions
-- groups: Add topics-layout backend protocol and Telethon adapter
-- config: Add topics_layout default to TelegramDefaults
-- telegram: Add proxy_url config option
+- Configurable topics layout (list/tabs) across config, CLI, and HTTP (#4)
 - config: Add ~/.config fallback and bootstrap
 - Verify acceptance criteria for telegram skill and dry-run
 - Add error guidance, clarification templates, and scope boundaries to SKILL.md
@@ -46,9 +36,6 @@
 
 ### Bug Fixes
 
-- Read forum_tabs from Channel constructor, not ChannelFull
-- Address codex review findings
-- review: Propagate FLOOD_WAIT through layout calls and document topics_layout
 - Address codex review findings
 - Address code review findings
 - review: Unblock bulk-remove --dry-run for protected accounts

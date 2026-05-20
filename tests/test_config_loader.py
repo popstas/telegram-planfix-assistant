@@ -228,6 +228,43 @@ logging:
     assert "logging.level" in str(excinfo.value)
 
 
+def test_telethon_level_defaults_to_none_and_accepts_valid() -> None:
+    valid = """
+telegram:
+  api_id: 1
+  api_hash: "h"
+  session_path: /tmp/s
+  default_chat_folder:
+    folder_name: "X"
+http:
+  bearer_token: "tok"
+logging:
+  level: INFO
+  telethon_level: debug
+"""
+    config = load_config_from_text(valid)
+    assert config.logging.telethon_level == "DEBUG"
+
+
+def test_invalid_telethon_level_rejected() -> None:
+    bad = """
+telegram:
+  api_id: 1
+  api_hash: "h"
+  session_path: /tmp/s
+  default_chat_folder:
+    folder_name: "X"
+http:
+  bearer_token: "tok"
+logging:
+  level: INFO
+  telethon_level: SHOUTING
+"""
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_text(bad)
+    assert "logging.telethon_level" in str(excinfo.value)
+
+
 def test_invalid_http_port_rejected() -> None:
     bad = """
 telegram:

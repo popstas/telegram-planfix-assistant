@@ -84,6 +84,10 @@ class LoggingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     level: str = "INFO"
+    # Telethon's own logger level. ``None`` caps it at WARNING regardless of
+    # ``level`` so per-health-check MTProto chatter stays out of the logs;
+    # set explicitly (e.g. "DEBUG") to re-enable Telethon's output.
+    telethon_level: str | None = None
 
     @field_validator("level")
     @classmethod
@@ -92,6 +96,19 @@ class LoggingConfig(BaseModel):
         up = v.upper()
         if up not in allowed:
             raise ValueError(f"logging.level must be one of {sorted(allowed)}")
+        return up
+
+    @field_validator("telethon_level")
+    @classmethod
+    def _telethon_level_known(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        allowed = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
+        up = v.upper()
+        if up not in allowed:
+            raise ValueError(
+                f"logging.telethon_level must be one of {sorted(allowed)}"
+            )
         return up
 
 

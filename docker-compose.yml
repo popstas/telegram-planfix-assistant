@@ -20,7 +20,7 @@ services:
           python -c "import urllib.request,sys;
           r=urllib.request.urlopen('http://127.0.0.1:8085/health',timeout=5);
           sys.exit(0 if r.status==200 else 1)"
-      interval: 30s
+      interval: 60s
       timeout: 5s
       retries: 3
       start_period: 10s

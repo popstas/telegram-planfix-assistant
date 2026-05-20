@@ -89,6 +89,23 @@ async def probe_default_folder(
         return FOLDER_MISSING
     if not state.authorized:
         return FOLDER_MISSING
+    return await _resolve_folder_status(
+        manager, folder_name, folder_id=folder_id
+    )
+
+
+async def _resolve_folder_status(
+    manager: TelethonSessionManager,
+    folder_name: str,
+    *,
+    folder_id: int | None = None,
+) -> str:
+    """Resolve folder presence on an already-known-authorized session.
+
+    Split out from :func:`probe_default_folder` so :func:`collect_health` can
+    skip the redundant ``state()`` round-trip when it has already confirmed the
+    session is authorized.
+    """
     try:
         client = await manager.get_client()
     except Exception:
@@ -106,6 +123,31 @@ async def probe_default_folder(
     except Exception:
         return FOLDER_MISSING
     return FOLDER_OK
+
+
+async def _probe_session_and_folder(
+    manager: TelethonSessionManager | None,
+    folder_name: str,
+    *,
+    folder_id: int | None = None,
+) -> tuple[str, str]:
+    """Return ``(session_status, folder_status)`` from a single ``state()`` call.
+
+    Used by :func:`collect_health` on the production path so one ``/health``
+    poll makes one Telegram round-trip instead of three.
+    """
+    if manager is None:
+        return SESSION_UNAUTHORIZED, FOLDER_MISSING
+    try:
+        state = await manager.state()
+    except Exception:
+        return SESSION_UNAUTHORIZED, FOLDER_MISSING
+    if not state.authorized:
+        return SESSION_UNAUTHORIZED, FOLDER_MISSING
+    folder_status = await _resolve_folder_status(
+        manager, folder_name, folder_id=folder_id
+    )
+    return SESSION_AUTHORIZED, folder_status
 
 
 async def collect_health(
@@ -126,19 +168,31 @@ async def collect_health(
     folder_name = config.telegram.default_chat_folder.folder_name
     folder_id = config.telegram.default_chat_folder.folder_id
 
-    session_status = await (
-        session_probe() if session_probe is not None else probe_telegram_session(session_manager)
-    )
     database_status = await (
         database_probe() if database_probe is not None else probe_database(db_path)
     )
-    folder_status = await (
-        folder_probe()
-        if folder_probe is not None
-        else probe_default_folder(
+
+    # Production path (no injected probes): fetch the session state exactly once
+    # and reuse it for both the session and folder checks. This avoids the
+    # redundant `state()`/`get_me()` round-trips a `/health` poll otherwise
+    # makes every interval.
+    if session_probe is None and folder_probe is None:
+        session_status, folder_status = await _probe_session_and_folder(
             session_manager, folder_name, folder_id=folder_id
         )
-    )
+    else:
+        session_status = await (
+            session_probe()
+            if session_probe is not None
+            else probe_telegram_session(session_manager)
+        )
+        folder_status = await (
+            folder_probe()
+            if folder_probe is not None
+            else probe_default_folder(
+                session_manager, folder_name, folder_id=folder_id
+            )
+        )
 
     return HealthReport(
         status="ok",

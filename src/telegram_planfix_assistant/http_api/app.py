@@ -204,7 +204,11 @@ def create_app(
     # Honor the operator-configured log level for both stdlib and structlog
     # output. Without this the first `get_logger()` call would auto-configure
     # at INFO regardless of what `data/config.yml` requested.
-    configure_logging(level=config.logging.level, force=True)
+    configure_logging(
+        level=config.logging.level,
+        telethon_level=config.logging.telethon_level,
+        force=True,
+    )
 
     # Auto-construct a Telethon session manager from config when the caller did
     # not supply one. This is the production path: `uvicorn ... --factory`
