@@ -122,9 +122,9 @@ The seven fixes:
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] Run full suite: `pytest`
-- [ ] Run linter: `ruff check src tests`
-- [ ] Verify coverage stays at 80%+ for the changed modules.
+- [x] Run full suite: `pytest` (519 passed)
+- [x] Run linter: `ruff check src tests` (all checks passed)
+- [x] Verify coverage stays at 80%+ for the changed modules (groups/service 89%, members/service 94%, persistence/store 90%, config/models 98%; telethon adapters intentionally fake-backed per CLAUDE.md).
 
 ### Task 8: Update documentation
 
