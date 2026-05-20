@@ -272,6 +272,71 @@ async def test_get_topics_layout_translates_flood_wait_on_resolver() -> None:
     assert excinfo.value.seconds == 4.0
 
 
+class _ChatExistsClient:
+    """Resolves the entity, then raises ``raise_on_call`` from the request
+    (or returns successfully when ``raise_on_call`` is ``None``)."""
+
+    def __init__(self, *, raise_on_call: BaseException | None = None) -> None:
+        self._raise_on_call = raise_on_call
+
+    async def get_input_entity(self, chat_id: int) -> _Peer:
+        return _Peer(chat_id)
+
+    async def __call__(self, request: Any) -> Any:
+        if self._raise_on_call is not None:
+            raise self._raise_on_call
+        return type("R", (), {})()
+
+
+@pytest.mark.asyncio
+async def test_chat_exists_true_when_request_succeeds() -> None:
+    backend = TelethonGroupBackend(_ChatExistsClient())
+    assert await backend.chat_exists(chat_id=1) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exc_name", ["ChannelInvalidError", "ChannelPrivateError"])
+async def test_chat_exists_false_on_known_gone_errors(exc_name: str) -> None:
+    from telethon import errors as telethon_errors
+
+    exc_cls = getattr(telethon_errors, exc_name)
+    # These RPC errors require an underlying request object; build a minimal one.
+    request = type("Req", (), {"CONSTRUCTOR_ID": 0, "SUBCLASS_OF_ID": 0})()
+    backend = TelethonGroupBackend(_ChatExistsClient(raise_on_call=exc_cls(request)))
+    assert await backend.chat_exists(chat_id=1) is False
+
+
+@pytest.mark.asyncio
+async def test_chat_exists_false_when_entity_unresolvable() -> None:
+    # ``get_input_entity`` raises ValueError when it cannot resolve the peer.
+    class _Unresolvable:
+        async def get_input_entity(self, chat_id: int) -> Any:
+            raise ValueError("Cannot find any entity corresponding to ...")
+
+        async def __call__(self, request: Any) -> Any:  # pragma: no cover
+            raise AssertionError("request should not run after resolve failure")
+
+    backend = TelethonGroupBackend(_Unresolvable())
+    assert await backend.chat_exists(chat_id=1) is False
+
+
+@pytest.mark.asyncio
+async def test_chat_exists_reraises_unexpected_error() -> None:
+    backend = TelethonGroupBackend(
+        _ChatExistsClient(raise_on_call=RuntimeError("server overloaded"))
+    )
+    with pytest.raises(RuntimeError, match="server overloaded"):
+        await backend.chat_exists(chat_id=1)
+
+
+@pytest.mark.asyncio
+async def test_chat_exists_translates_flood_wait() -> None:
+    backend = TelethonGroupBackend(_FloodingClient())
+    with pytest.raises(FloodWaitError) as excinfo:
+        await backend.chat_exists(chat_id=42)
+    assert excinfo.value.seconds == 9.0
+
+
 # ---------------------------------------------------------------------------
 # Service-layer tests (Task 3)
 # ---------------------------------------------------------------------------

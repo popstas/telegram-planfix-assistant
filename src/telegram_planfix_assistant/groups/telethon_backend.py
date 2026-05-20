@@ -241,6 +241,11 @@ class TelethonGroupBackend:
         so the caller can promote it to ``needs_review``; a "not found"-style
         error resolves to ``False``. Any other error propagates unchanged.
         """
+        from telethon.errors import (
+            ChannelInvalidError,
+            ChannelPrivateError,
+            PeerIdInvalidError,
+        )
         from telethon.tl.functions.channels import GetFullChannelRequest
 
         try:
@@ -251,21 +256,23 @@ class TelethonGroupBackend:
             if translated is not exc:
                 # A FLOOD_WAIT was translated to our queue signal — re-raise it.
                 raise translated from exc
-            name = type(exc).__name__
-            message = str(exc).lower()
-            # Telethon raises a variety of errors when the entity is gone:
-            # ChannelInvalidError / ChannelPrivateError / PeerIdInvalidError,
-            # or a plain "Cannot find any entity" ValueError from resolution.
-            if (
-                "invalid" in name.lower()
-                or "private" in name.lower()
-                or "cannot find" in message
-                or "could not find" in message
-                or "no user has" in message
-                or "not found" in message
+            # The chat is gone when Telegram reports the channel/peer is
+            # invalid, private, or unknown, or when entity resolution can't
+            # find it (``get_input_entity`` raises ``ValueError``). Match the
+            # concrete exception types rather than sniffing message strings,
+            # which drift across Telethon versions and locales. Anything else
+            # is unexpected and propagates unchanged.
+            if isinstance(
+                exc,
+                (
+                    ChannelInvalidError,
+                    ChannelPrivateError,
+                    PeerIdInvalidError,
+                    ValueError,
+                ),
             ):
                 return False
-            raise translated from exc
+            raise
         return True
 
     async def get_topics_layout(self, *, chat_id: int) -> bool:

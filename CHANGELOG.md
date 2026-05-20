@@ -51,6 +51,7 @@
 
 ### Documentation
 
+- Document group-create options and new config defaults
 - Add CLAUDE.md with architecture and command reference
 - Enforce e2e tests
 - Mark Task 18 e2e checkboxes as not-automatable
