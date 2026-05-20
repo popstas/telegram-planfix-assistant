@@ -16,6 +16,20 @@ class DefaultChatFolderConfig(BaseModel):
     folder_id: int | None = None
 
 
+class DefaultMemberPermissions(BaseModel):
+    """Default rights granted to ordinary members of a newly created group.
+
+    These map to *allowed* actions: ``True`` means the action is permitted for
+    everyone (the corresponding flag is cleared in the chat's default banned
+    rights). Other default rights are left untouched.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    create_topics: bool = True
+    pin_messages: bool = True
+
+
 class TelegramDefaults(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -25,6 +39,9 @@ class TelegramDefaults(BaseModel):
     # Appended to the Telegram chat title at creation time. Kept out of the
     # idempotency key so Planfix replays still match on the raw title.
     group_title_postfix: str = ""
+    default_member_permissions: DefaultMemberPermissions = Field(
+        default_factory=DefaultMemberPermissions
+    )
 
 
 class TelegramConfig(BaseModel):

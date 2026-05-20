@@ -337,6 +337,15 @@ class _FakeGroupBackend:
         self.get_calls.append(chat_id)
         return self.forum_tabs
 
+    async def set_default_permissions(
+        self,
+        *,
+        chat_id: int,
+        allow_create_topics: bool,
+        allow_pin_messages: bool,
+    ) -> None:
+        raise NotImplementedError
+
 
 @pytest.fixture()
 def store(tmp_path: Path) -> OperationStore:
