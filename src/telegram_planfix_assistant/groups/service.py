@@ -238,6 +238,16 @@ def _resolved_reserves(
     return list(explicit)
 
 
+def _drop_blank(items: Sequence[str]) -> list[str]:
+    """Drop ``None`` and blank/whitespace-only user references.
+
+    A stray empty string in ``members``/``admins``/reserves (common when a
+    Planfix scenario interpolates a missing field) must not crash the create —
+    it is silently skipped rather than passed down to the backend.
+    """
+    return [item for item in items if item is not None and str(item).strip()]
+
+
 def _dedupe(items: Sequence[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -339,7 +349,9 @@ async def _execute_create(
     # Build the ordered population plan, deduping users that appear in multiple
     # buckets so we never invite the same handle twice.
     all_members = _dedupe(
-        [*request.members, *reserve_members, *request.admins, *reserve_admins]
+        _drop_blank(
+            [*request.members, *reserve_members, *request.admins, *reserve_admins]
+        )
     )
     members_added: list[str] = []
     for user in all_members:
@@ -359,7 +371,7 @@ async def _execute_create(
         members_added.append(user)
 
     admins_promoted: list[str] = []
-    for admin in _dedupe([*request.admins, *reserve_admins]):
+    for admin in _dedupe(_drop_blank([*request.admins, *reserve_admins])):
         if admin not in members_added:
             # We never managed to add this user, so promoting them would
             # certainly fail. Record the skip and move on.

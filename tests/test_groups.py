@@ -465,6 +465,37 @@ async def test_create_group_task_message_only_when_bot_present(
     assert backend.messages == []
 
 
+async def test_create_group_skips_blank_member_references(
+    minimal_config_yaml: str, store: OperationStore
+) -> None:
+    config = _config(minimal_config_yaml)
+    backend = FakeGroupBackend()
+    folder_backend = FakeFolderBackend()
+    # A stray empty string and a whitespace-only entry must be dropped instead
+    # of crashing the create or reaching the backend.
+    request = GroupCreateRequest(
+        title="Blanks",
+        admins=["@alice", "   "],
+        members=["@bob", "", "@carol"],
+        skip_reserve=True,
+    )
+
+    result, op = await create_group(
+        backend=backend,
+        folder_backend=folder_backend,
+        store=store,
+        config=config.telegram,
+        request=request,
+    )
+
+    assert op.status is OperationStatus.COMPLETED
+    assert result.members_added == ["@bob", "@carol", "@alice"]
+    assert result.admins_promoted == ["@alice"]
+    assert backend.added == ["@bob", "@carol", "@alice"]
+    # Blanks never produced an add_member call or a skipped entry.
+    assert all("" != s.get("user", "x").strip() for s in result.skipped)
+
+
 async def test_create_group_failure_records_failed(
     minimal_config_yaml: str, store: OperationStore
 ) -> None:

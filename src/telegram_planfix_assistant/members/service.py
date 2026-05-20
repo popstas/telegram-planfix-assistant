@@ -364,8 +364,13 @@ async def bulk_add_members(
     """
     if not request.items:
         raise ValueError("bulk member add requires at least one item")
+    # Drop blank/whitespace-only user references up front so a stray empty
+    # string no longer raises in normalize_user_ref and aborts the whole batch.
+    items = [it for it in request.items if it.user is not None and str(it.user).strip()]
+    if not items:
+        raise ValueError("bulk member add requires at least one non-blank item")
     normalized_per_item: list[NormalizedMember] = [
-        normalize_user_ref(it.user) for it in request.items
+        normalize_user_ref(it.user) for it in items
     ]
 
     parent_key, _ = _bulk_parent_key(request.operation_id)
@@ -377,7 +382,7 @@ async def bulk_add_members(
     parent_op = begin.operation
 
     specs: list[BulkItemSpec] = []
-    for it, normalized in zip(request.items, normalized_per_item, strict=True):
+    for it, normalized in zip(items, normalized_per_item, strict=True):
         per_key = idempotency.member_add_key(
             telegram_chat_id=request.telegram_chat_id,
             user=normalized.value,
@@ -404,6 +409,7 @@ async def bulk_add_members(
                 _replay_bulk(
                     parent_op=parent_op,
                     specs=specs,
+                    items=items,
                     normalized_per_item=normalized_per_item,
                     request=request,
                     store=store,
@@ -496,7 +502,7 @@ async def bulk_add_members(
         "skipped": 0,
     }
     for spec, item_input, normalized in zip(
-        specs, request.items, normalized_per_item, strict=True
+        specs, items, normalized_per_item, strict=True
     ):
         rec = records_by_key.get(spec.idempotency_key)
         was_existing = spec.idempotency_key in pre_existing_completed
@@ -552,6 +558,7 @@ def _replay_bulk(
     *,
     parent_op: OperationRecord,
     specs: Sequence[BulkItemSpec],
+    items: Sequence[BulkMemberItem],
     normalized_per_item: Sequence[NormalizedMember],
     request: BulkMemberAddRequest,
     store: OperationStore,
@@ -570,7 +577,7 @@ def _replay_bulk(
         "skipped": 0,
     }
     for spec, item_input, normalized in zip(
-        specs, request.items, normalized_per_item, strict=True
+        specs, items, normalized_per_item, strict=True
     ):
         rec = items_by_key.get(spec.idempotency_key)
         built = _build_item_result(
